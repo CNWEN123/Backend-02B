@@ -1966,26 +1966,34 @@ async function renderAdmins() {
     const content = document.getElementById('pageContent');
     
     try {
-        const res = await apiRequest('/admin/users');
-        const list = res.data || [];
+        const [usersRes, rolesRes] = await Promise.all([
+            apiRequest('/admin/users'),
+            apiRequest('/admin/roles')
+        ]);
+        const list = usersRes.data || [];
+        const roles = rolesRes.data || [];
+        
+        // 获取当前登录用户信息
+        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
         
         content.innerHTML = `
             <div class="card">
                 <div class="card-header flex items-center justify-between">
-                    <span>管理员账号</span>
-                    <button class="btn btn-primary text-sm"><i class="fas fa-plus mr-1"></i>新增管理员</button>
+                    <span><i class="fas fa-users-cog mr-2 text-blue-500"></i>管理员账号 <span class="badge badge-primary ml-2">${list.length}</span></span>
+                    <button onclick="showAddAdmin()" class="btn btn-primary text-sm"><i class="fas fa-plus mr-1"></i>新增管理员</button>
                 </div>
                 <div class="card-body">
                     <div class="overflow-x-auto">
                         <table class="data-table">
                             <thead>
                                 <tr>
+                                    <th>ID</th>
                                     <th>账号</th>
                                     <th>昵称</th>
                                     <th>角色</th>
+                                    <th>IP白名单</th>
                                     <th>2FA状态</th>
-                                    <th>最后登录IP</th>
-                                    <th>最后登录时间</th>
+                                    <th>最后登录</th>
                                     <th>状态</th>
                                     <th>操作</th>
                                 </tr>
@@ -1993,16 +2001,34 @@ async function renderAdmins() {
                             <tbody>
                                 ${list.map(admin => `
                                     <tr>
+                                        <td class="text-gray-500">${admin.admin_id}</td>
                                         <td class="font-medium">${escapeHtml(admin.username)}</td>
                                         <td>${escapeHtml(admin.nickname) || '-'}</td>
-                                        <td><span class="badge badge-info">${escapeHtml(admin.role_name)}</span></td>
-                                        <td>${admin.two_fa_enabled ? '<span class="text-green-500"><i class="fas fa-check-circle"></i> 已绑定</span>' : '<span class="text-gray-400">未绑定</span>'}</td>
-                                        <td class="font-mono text-sm">${escapeHtml(admin.last_login_ip) || '-'}</td>
-                                        <td>${formatDate(admin.last_login_at)}</td>
-                                        <td>${getStatusBadge(admin.status)}</td>
+                                        <td><span class="badge badge-info">${escapeHtml(admin.role_name || '未分配')}</span></td>
                                         <td>
-                                            <button class="text-blue-500 hover:text-blue-700 mr-2"><i class="fas fa-edit"></i></button>
-                                            <button class="text-red-500 hover:text-red-700"><i class="fas fa-key"></i></button>
+                                            ${admin.ip_whitelist && admin.ip_whitelist.length > 0 
+                                                ? `<span class="text-green-600 cursor-pointer" onclick="showAdminIPWhitelist(${admin.admin_id}, '${escapeAttr(admin.username)}')" title="点击管理">
+                                                    <i class="fas fa-shield-alt"></i> ${admin.ip_whitelist.length}个IP
+                                                   </span>`
+                                                : `<span class="text-gray-400 cursor-pointer" onclick="showAdminIPWhitelist(${admin.admin_id}, '${escapeAttr(admin.username)}')" title="点击设置">
+                                                    <i class="fas fa-shield-alt"></i> 未限制
+                                                   </span>`
+                                            }
+                                        </td>
+                                        <td>${admin.two_fa_enabled ? '<span class="text-green-500"><i class="fas fa-check-circle"></i> 已绑定</span>' : '<span class="text-gray-400">未绑定</span>'}</td>
+                                        <td>
+                                            <div class="text-sm">${escapeHtml(admin.last_login_ip) || '-'}</div>
+                                            <div class="text-xs text-gray-500">${formatDate(admin.last_login_at)}</div>
+                                        </td>
+                                        <td>${getStatusBadge(admin.status)}</td>
+                                        <td class="space-x-1">
+                                            <button onclick="editAdmin(${admin.admin_id})" class="text-blue-500 hover:text-blue-700" title="编辑"><i class="fas fa-edit"></i></button>
+                                            <button onclick="showAdminIPWhitelist(${admin.admin_id}, '${escapeAttr(admin.username)}')" class="text-green-500 hover:text-green-700" title="IP白名单"><i class="fas fa-shield-alt"></i></button>
+                                            <button onclick="resetAdminPassword(${admin.admin_id}, '${escapeAttr(admin.username)}')" class="text-orange-500 hover:text-orange-700" title="重置密码"><i class="fas fa-key"></i></button>
+                                            ${admin.admin_id !== currentUser.admin_id ? `
+                                            <button onclick="toggleAdminStatus(${admin.admin_id}, ${admin.status})" class="text-${admin.status === 1 ? 'red' : 'green'}-500 hover:text-${admin.status === 1 ? 'red' : 'green'}-700" title="${admin.status === 1 ? '禁用' : '启用'}">
+                                                <i class="fas fa-${admin.status === 1 ? 'ban' : 'check'}"></i>
+                                            </button>` : ''}
                                         </td>
                                     </tr>
                                 `).join('')}
@@ -2012,8 +2038,335 @@ async function renderAdmins() {
                 </div>
             </div>
         `;
+        
+        // 存储角色列表供后续使用
+        window._adminRoles = roles;
     } catch (error) {
         content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+    }
+}
+
+// 显示新增管理员弹窗
+async function showAddAdmin() {
+    const roles = window._adminRoles || [];
+    
+    showModal(`
+        <h3 class="text-lg font-bold mb-4"><i class="fas fa-user-plus text-blue-500 mr-2"></i>新增管理员</h3>
+        <form id="addAdminForm" class="space-y-4">
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">登录账号 <span class="text-red-500">*</span></label>
+                    <input type="text" id="adminUsername" class="form-input w-full" placeholder="请输入登录账号" required>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">登录密码 <span class="text-red-500">*</span></label>
+                    <input type="password" id="adminPassword" class="form-input w-full" placeholder="至少6位密码" required minlength="6">
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">昵称</label>
+                    <input type="text" id="adminNickname" class="form-input w-full" placeholder="请输入昵称(选填)">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">角色 <span class="text-red-500">*</span></label>
+                    <select id="adminRole" class="form-input w-full" required>
+                        ${roles.map(r => `<option value="${r.role_id}">${escapeHtml(r.role_name)}</option>`).join('')}
+                    </select>
+                </div>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">IP白名单 <span class="text-gray-400 text-xs">(可选，限制该账号只能从指定IP登录)</span></label>
+                <div id="adminIPList" class="space-y-2 mb-2"></div>
+                <button type="button" onclick="addAdminIPField()" class="text-sm text-blue-500 hover:text-blue-700"><i class="fas fa-plus mr-1"></i>添加IP地址</button>
+            </div>
+            <div class="flex justify-end space-x-3 pt-4 border-t">
+                <button type="button" onclick="closeModal()" class="btn btn-secondary">取消</button>
+                <button type="submit" class="btn btn-primary">创建</button>
+            </div>
+        </form>
+    `);
+    
+    document.getElementById('addAdminForm').onsubmit = async (e) => {
+        e.preventDefault();
+        await submitAdmin();
+    };
+}
+
+// 添加IP输入框
+function addAdminIPField(value = '') {
+    const container = document.getElementById('adminIPList');
+    const div = document.createElement('div');
+    div.className = 'flex items-center space-x-2';
+    div.innerHTML = `
+        <input type="text" class="admin-ip-input form-input flex-1" value="${escapeAttr(value)}" placeholder="如: 192.168.1.100 或 10.0.0.0/24">
+        <button type="button" onclick="this.parentElement.remove()" class="text-red-500 hover:text-red-700"><i class="fas fa-times"></i></button>
+    `;
+    container.appendChild(div);
+}
+
+// 提交新增管理员
+async function submitAdmin(adminId = null) {
+    const ipInputs = document.querySelectorAll('.admin-ip-input');
+    const ipList = Array.from(ipInputs).map(i => i.value.trim()).filter(v => v);
+    
+    const data = {
+        username: document.getElementById('adminUsername')?.value.trim(),
+        password: document.getElementById('adminPassword')?.value,
+        nickname: document.getElementById('adminNickname')?.value.trim() || null,
+        role_id: parseInt(document.getElementById('adminRole')?.value),
+        ip_whitelist: ipList.length > 0 ? ipList : null
+    };
+    
+    if (!adminId && (!data.username || !data.password)) {
+        alert('请填写账号和密码'); return;
+    }
+    if (!adminId && data.password && data.password.length < 6) {
+        alert('密码长度至少6位'); return;
+    }
+    
+    try {
+        const url = adminId ? `/admin/users/${adminId}` : '/admin/users';
+        const method = adminId ? 'PUT' : 'POST';
+        
+        // 编辑时不传password
+        if (adminId) {
+            delete data.username;
+            delete data.password;
+        }
+        
+        const res = await apiRequest(url, { method, body: JSON.stringify(data) });
+        if (res.success) {
+            closeModal();
+            alert(adminId ? '更新成功' : '创建成功');
+            loadPage('system-admins');
+        } else {
+            alert(res.message || '操作失败');
+        }
+    } catch (error) {
+        alert('操作失败: ' + error.message);
+    }
+}
+
+// 编辑管理员
+async function editAdmin(adminId) {
+    try {
+        const res = await apiRequest(`/admin/users/${adminId}`);
+        if (!res.success) { alert('获取详情失败'); return; }
+        
+        const admin = res.data;
+        const roles = window._adminRoles || [];
+        
+        showModal(`
+            <h3 class="text-lg font-bold mb-4"><i class="fas fa-user-edit text-blue-500 mr-2"></i>编辑管理员 - ${escapeHtml(admin.username)}</h3>
+            <form id="editAdminForm" class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">登录账号</label>
+                        <input type="text" class="form-input w-full bg-gray-100" value="${escapeAttr(admin.username)}" disabled>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">昵称</label>
+                        <input type="text" id="adminNickname" class="form-input w-full" value="${escapeAttr(admin.nickname || '')}" placeholder="请输入昵称">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">角色</label>
+                        <select id="adminRole" class="form-input w-full">
+                            ${roles.map(r => `<option value="${r.role_id}" ${r.role_id === admin.role_id ? 'selected' : ''}>${escapeHtml(r.role_name)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">状态</label>
+                        <select id="adminStatus" class="form-input w-full">
+                            <option value="1" ${admin.status === 1 ? 'selected' : ''}>启用</option>
+                            <option value="0" ${admin.status === 0 ? 'selected' : ''}>禁用</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">IP白名单 <span class="text-gray-400 text-xs">(限制该账号只能从指定IP登录，留空则不限制)</span></label>
+                    <div id="adminIPList" class="space-y-2 mb-2"></div>
+                    <button type="button" onclick="addAdminIPField()" class="text-sm text-blue-500 hover:text-blue-700"><i class="fas fa-plus mr-1"></i>添加IP地址</button>
+                </div>
+                <div class="flex justify-end space-x-3 pt-4 border-t">
+                    <button type="button" onclick="closeModal()" class="btn btn-secondary">取消</button>
+                    <button type="submit" class="btn btn-primary">保存</button>
+                </div>
+            </form>
+        `);
+        
+        // 填充现有IP白名单
+        if (admin.ip_whitelist && admin.ip_whitelist.length > 0) {
+            admin.ip_whitelist.forEach(ip => addAdminIPField(ip));
+        }
+        
+        document.getElementById('editAdminForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const ipInputs = document.querySelectorAll('.admin-ip-input');
+            const ipList = Array.from(ipInputs).map(i => i.value.trim()).filter(v => v);
+            
+            const data = {
+                nickname: document.getElementById('adminNickname').value.trim() || null,
+                role_id: parseInt(document.getElementById('adminRole').value),
+                status: parseInt(document.getElementById('adminStatus').value),
+                ip_whitelist: ipList.length > 0 ? ipList : null
+            };
+            
+            try {
+                const res = await apiRequest(`/admin/users/${adminId}`, { method: 'PUT', body: JSON.stringify(data) });
+                if (res.success) {
+                    closeModal();
+                    alert('更新成功');
+                    loadPage('system-admins');
+                } else {
+                    alert(res.message || '更新失败');
+                }
+            } catch (error) {
+                alert('更新失败: ' + error.message);
+            }
+        };
+    } catch (error) {
+        alert('获取详情失败: ' + error.message);
+    }
+}
+
+// 显示管理员IP白名单管理弹窗
+async function showAdminIPWhitelist(adminId, username) {
+    try {
+        const res = await apiRequest(`/admin/users/${adminId}`);
+        if (!res.success) { alert('获取详情失败'); return; }
+        
+        const admin = res.data;
+        const ipList = admin.ip_whitelist || [];
+        
+        showModal(`
+            <h3 class="text-lg font-bold mb-4">
+                <i class="fas fa-shield-alt text-green-500 mr-2"></i>
+                IP白名单 - ${escapeHtml(username)}
+            </h3>
+            <div class="bg-yellow-50 border border-yellow-200 rounded p-3 mb-4">
+                <i class="fas fa-info-circle text-yellow-600 mr-1"></i>
+                <span class="text-yellow-700 text-sm">设置IP白名单后，该账号只能从指定IP登录系统。留空则不限制登录IP。</span>
+            </div>
+            <form id="adminIPWhitelistForm" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">允许登录的IP地址</label>
+                    <div id="adminIPList" class="space-y-2 mb-3 max-h-60 overflow-y-auto">
+                        ${ipList.length === 0 ? '<div class="text-gray-400 text-sm py-2">暂未设置IP限制</div>' : ''}
+                    </div>
+                    <button type="button" onclick="addAdminIPField()" class="text-sm text-blue-500 hover:text-blue-700">
+                        <i class="fas fa-plus mr-1"></i>添加IP地址
+                    </button>
+                </div>
+                <div class="text-sm text-gray-500 space-y-1">
+                    <div><strong>支持格式：</strong></div>
+                    <div>• 单个IP：<code class="bg-gray-100 px-1 rounded">192.168.1.100</code></div>
+                    <div>• CIDR网段：<code class="bg-gray-100 px-1 rounded">10.0.0.0/24</code></div>
+                </div>
+                <div class="flex justify-end space-x-3 pt-4 border-t">
+                    <button type="button" onclick="closeModal()" class="btn btn-secondary">取消</button>
+                    <button type="submit" class="btn btn-primary">保存设置</button>
+                </div>
+            </form>
+        `);
+        
+        // 填充现有IP
+        if (ipList.length > 0) {
+            document.getElementById('adminIPList').innerHTML = '';
+            ipList.forEach(ip => addAdminIPField(ip));
+        }
+        
+        document.getElementById('adminIPWhitelistForm').onsubmit = async (e) => {
+            e.preventDefault();
+            await saveAdminIPWhitelist(adminId);
+        };
+    } catch (error) {
+        alert('获取详情失败: ' + error.message);
+    }
+}
+
+// 保存管理员IP白名单
+async function saveAdminIPWhitelist(adminId) {
+    const ipInputs = document.querySelectorAll('.admin-ip-input');
+    const ipList = Array.from(ipInputs).map(i => i.value.trim()).filter(v => v);
+    
+    // 验证IP格式
+    const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
+    const cidrRegex = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/;
+    
+    for (const ip of ipList) {
+        if (!ipv4Regex.test(ip) && !cidrRegex.test(ip)) {
+            alert(`IP地址格式无效: ${ip}`);
+            return;
+        }
+    }
+    
+    try {
+        const res = await apiRequest(`/admin/users/${adminId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ ip_whitelist: ipList.length > 0 ? ipList : null })
+        });
+        
+        if (res.success) {
+            closeModal();
+            alert(ipList.length > 0 ? `已设置 ${ipList.length} 个IP白名单` : 'IP限制已清除');
+            loadPage('system-admins');
+        } else {
+            alert(res.message || '保存失败');
+        }
+    } catch (error) {
+        alert('保存失败: ' + error.message);
+    }
+}
+
+// 重置管理员密码
+async function resetAdminPassword(adminId, username) {
+    const newPassword = prompt(`请输入管理员 "${username}" 的新密码（至少6位）:`);
+    if (!newPassword) return;
+    if (newPassword.length < 6) {
+        alert('密码长度至少6位');
+        return;
+    }
+    
+    try {
+        const res = await apiRequest(`/admin/users/${adminId}/password`, {
+            method: 'PUT',
+            body: JSON.stringify({ password: newPassword })
+        });
+        
+        if (res.success) {
+            alert('密码重置成功');
+        } else {
+            alert(res.message || '重置失败');
+        }
+    } catch (error) {
+        alert('重置失败: ' + error.message);
+    }
+}
+
+// 切换管理员状态
+async function toggleAdminStatus(adminId, currentStatus) {
+    const newStatus = currentStatus === 1 ? 0 : 1;
+    const action = newStatus === 1 ? '启用' : '禁用';
+    
+    if (!confirm(`确定要${action}该管理员吗？`)) return;
+    
+    try {
+        const res = await apiRequest(`/admin/users/${adminId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ status: newStatus })
+        });
+        
+        if (res.success) {
+            alert(`${action}成功`);
+            loadPage('system-admins');
+        } else {
+            alert(res.message || '操作失败');
+        }
+    } catch (error) {
+        alert('操作失败: ' + error.message);
     }
 }
 

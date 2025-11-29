@@ -3473,15 +3473,51 @@ app.get('/api/v1/admin/users', async (c) => {
     const result = await c.env.DB.prepare(`
       SELECT a.admin_id, a.username, a.nickname, a.role_id, a.status, 
              a.two_fa_enabled, a.last_login_ip, a.last_login_at, a.created_at,
-             r.role_name
+             a.ip_whitelist, r.role_name
       FROM admin_users a
       LEFT JOIN admin_roles r ON a.role_id = r.role_id
       ORDER BY a.admin_id
     `).all()
 
-    return c.json({ success: true, data: result.results || [] })
+    // 解析ip_whitelist JSON字符串
+    const data = (result.results || []).map((admin: any) => ({
+      ...admin,
+      ip_whitelist: admin.ip_whitelist ? JSON.parse(admin.ip_whitelist) : []
+    }))
+
+    return c.json({ success: true, data })
   } catch (error) {
     return c.json({ success: false, message: '获取管理员列表失败' }, 500)
+  }
+})
+
+// 获取单个管理员详情（包含IP白名单）
+app.get('/api/v1/admin/users/:admin_id', async (c) => {
+  const admin_id = c.req.param('admin_id')
+  
+  try {
+    const admin = await c.env.DB.prepare(`
+      SELECT a.admin_id, a.username, a.nickname, a.role_id, a.status, 
+             a.two_fa_enabled, a.last_login_ip, a.last_login_at, a.created_at,
+             a.ip_whitelist, r.role_name
+      FROM admin_users a
+      LEFT JOIN admin_roles r ON a.role_id = r.role_id
+      WHERE a.admin_id = ?
+    `).bind(admin_id).first()
+
+    if (!admin) {
+      return c.json({ success: false, message: '管理员不存在' }, 404)
+    }
+
+    return c.json({ 
+      success: true, 
+      data: {
+        ...admin,
+        ip_whitelist: admin.ip_whitelist ? JSON.parse(admin.ip_whitelist as string) : []
+      }
+    })
+  } catch (error) {
+    return c.json({ success: false, message: '获取管理员详情失败' }, 500)
   }
 })
 
@@ -3515,22 +3551,69 @@ app.post('/api/v1/admin/users', async (c) => {
 // 更新管理员
 app.put('/api/v1/admin/users/:admin_id', async (c) => {
   const admin_id = c.req.param('admin_id')
-  const { nickname, role_id, status, ip_whitelist } = await c.req.json()
+  const body = await c.req.json()
+  const { nickname, role_id, ip_whitelist } = body
+  // status特殊处理：0是有效值
+  const status = body.status !== undefined ? body.status : null
 
   try {
-    await c.env.DB.prepare(`
-      UPDATE admin_users SET
-        nickname = COALESCE(?, nickname),
-        role_id = COALESCE(?, role_id),
-        status = COALESCE(?, status),
-        ip_whitelist = ?,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE admin_id = ?
-    `).bind(nickname, role_id, status, ip_whitelist ? JSON.stringify(ip_whitelist) : null, admin_id).run()
+    if (status !== null) {
+      await c.env.DB.prepare(`
+        UPDATE admin_users SET
+          nickname = COALESCE(?, nickname),
+          role_id = COALESCE(?, role_id),
+          status = ?,
+          ip_whitelist = ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE admin_id = ?
+      `).bind(nickname || null, role_id || null, status, ip_whitelist ? JSON.stringify(ip_whitelist) : null, admin_id).run()
+    } else {
+      await c.env.DB.prepare(`
+        UPDATE admin_users SET
+          nickname = COALESCE(?, nickname),
+          role_id = COALESCE(?, role_id),
+          ip_whitelist = ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE admin_id = ?
+      `).bind(nickname || null, role_id || null, ip_whitelist ? JSON.stringify(ip_whitelist) : null, admin_id).run()
+    }
 
     return c.json({ success: true, message: '更新成功' })
   } catch (error) {
     return c.json({ success: false, message: '更新失败' }, 500)
+  }
+})
+
+// 重置管理员密码
+app.put('/api/v1/admin/users/:admin_id/password', async (c) => {
+  const admin_id = c.req.param('admin_id')
+  const { password } = await c.req.json()
+  const currentAdmin = c.get('admin')
+
+  if (!password || password.length < 6) {
+    return c.json({ success: false, message: '密码长度至少6位' }, 400)
+  }
+
+  try {
+    const passwordHash = await hashPassword(password)
+    
+    await c.env.DB.prepare(`
+      UPDATE admin_users SET 
+        password_hash = ?,
+        password_changed_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE admin_id = ?
+    `).bind(passwordHash, admin_id).run()
+
+    // 记录审计日志
+    await c.env.DB.prepare(`
+      INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, target_id, new_value, ip_address)
+      VALUES (?, ?, 'UPDATE', 'admin_users', ?, '重置密码', ?)
+    `).bind(currentAdmin.admin_id, currentAdmin.username, admin_id, c.req.header('CF-Connecting-IP') || 'unknown').run()
+
+    return c.json({ success: true, message: '密码重置成功' })
+  } catch (error) {
+    return c.json({ success: false, message: '重置失败' }, 500)
   }
 })
 
