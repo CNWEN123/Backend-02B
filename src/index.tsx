@@ -2491,26 +2491,22 @@ app.get('/api/v1/risk/rules/:rule_id', async (c) => {
 // 创建风控规则
 app.post('/api/v1/risk/rules', async (c) => {
   try {
-    const { rule_name, rule_type, threshold_value, time_window, alert_level, rule_action, status = 1 } = await c.req.json()
+    const { rule_name, rule_type, rule_condition, rule_action, threshold, status = 1 } = await c.req.json()
 
     if (!rule_name || !rule_type) {
       return c.json({ success: false, message: '规则名称和类型为必填项' }, 400)
     }
 
-    const validTypes = ['single_bet_limit', 'daily_win_limit', 'ip_multi_account', 'device_multi_account', 'deposit_frequency', 'withdraw_frequency', 'bet_pattern']
-    if (!validTypes.includes(rule_type)) {
-      return c.json({ success: false, message: '无效的规则类型' }, 400)
-    }
+    // 构建规则条件JSON
+    const conditionJson = rule_condition || JSON.stringify({ threshold: parseFloat(threshold) || 0 })
 
     const result = await c.env.DB.prepare(`
-      INSERT INTO risk_rules (rule_name, rule_type, threshold_value, time_window, alert_level, rule_action, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO risk_rules (rule_name, rule_type, rule_condition, rule_action, status)
+      VALUES (?, ?, ?, ?, ?)
     `).bind(
       String(rule_name).substring(0, 100),
-      rule_type,
-      parseFloat(threshold_value) || 0,
-      parseInt(time_window) || 24,
-      parseInt(alert_level) || 1,
+      String(rule_type).substring(0, 50),
+      conditionJson,
       rule_action || 'alert',
       status === 0 ? 0 : 1
     ).run()
@@ -2528,15 +2524,15 @@ app.put('/api/v1/risk/rules/:rule_id', async (c) => {
   
   try {
     const body = await c.req.json()
-    const { rule_name, threshold_value, time_window, alert_level, rule_action, status } = body
+    const { rule_name, rule_type, rule_condition, rule_action, threshold, status } = body
 
     const updates: string[] = []
     const params: any[] = []
 
     if (rule_name !== undefined) { updates.push('rule_name = ?'); params.push(String(rule_name).substring(0, 100)) }
-    if (threshold_value !== undefined) { updates.push('threshold_value = ?'); params.push(parseFloat(threshold_value) || 0) }
-    if (time_window !== undefined) { updates.push('time_window = ?'); params.push(parseInt(time_window) || 24) }
-    if (alert_level !== undefined) { updates.push('alert_level = ?'); params.push(parseInt(alert_level) || 1) }
+    if (rule_type !== undefined) { updates.push('rule_type = ?'); params.push(String(rule_type).substring(0, 50)) }
+    if (rule_condition !== undefined) { updates.push('rule_condition = ?'); params.push(rule_condition) }
+    else if (threshold !== undefined) { updates.push('rule_condition = ?'); params.push(JSON.stringify({ threshold: parseFloat(threshold) || 0 })) }
     if (rule_action !== undefined) { updates.push('rule_action = ?'); params.push(rule_action) }
     if (status !== undefined) { updates.push('status = ?'); params.push(status === 0 ? 0 : 1) }
 
