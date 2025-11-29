@@ -2873,7 +2873,17 @@ function searchPlayers() {
 
 // 模态框
 function openModal(content) {
-    document.getElementById('modalContent').innerHTML = content;
+    const modalContent = document.getElementById('modalContent');
+    modalContent.innerHTML = content;
+    modalContent.className = 'modal-content bg-white rounded-xl shadow-2xl p-6 max-w-lg w-full';
+    document.getElementById('modal').classList.add('active');
+}
+
+// 支持自定义宽度的模态框
+function showModal(content, widthClass = 'max-w-lg') {
+    const modalContent = document.getElementById('modalContent');
+    modalContent.innerHTML = content;
+    modalContent.className = `modal-content bg-white rounded-xl shadow-2xl p-6 ${widthClass} w-full`;
     document.getElementById('modal').classList.add('active');
 }
 
@@ -3547,22 +3557,75 @@ async function editTable(tableId) {
     } catch (error) { alert('获取详情失败: ' + error.message); }
 }
 
-// 角色权限管理 - 增强版
+// 角色权限管理 - 增强版 V2.1.13
+// 权限结构定义 - 用于前端展示层级结构
+const permissionStructure = {
+    'menu': { name: '菜单权限', icon: 'fa-bars', color: 'indigo' },
+    'dashboard': { name: '仪表盘', icon: 'fa-tachometer-alt', color: 'blue', parent: 'menu:dashboard' },
+    'player': { name: '玩家管理', icon: 'fa-users', color: 'green', parent: 'menu:hierarchy' },
+    'agent': { name: '代理管理', icon: 'fa-user-tie', color: 'green', parent: 'menu:hierarchy' },
+    'finance_transaction': { name: '交易记录', icon: 'fa-exchange-alt', color: 'yellow', parent: 'menu:finance' },
+    'finance_deposit': { name: '存款管理', icon: 'fa-plus-circle', color: 'yellow', parent: 'menu:finance' },
+    'finance_withdraw': { name: '取款管理', icon: 'fa-minus-circle', color: 'yellow', parent: 'menu:finance' },
+    'finance_turnover': { name: '流水稽核', icon: 'fa-calculator', color: 'yellow', parent: 'menu:finance' },
+    'bet': { name: '注单管理', icon: 'fa-dice', color: 'purple', parent: 'menu:bet' },
+    'commission_scheme': { name: '洗码方案', icon: 'fa-percentage', color: 'pink', parent: 'menu:commission' },
+    'commission_record': { name: '洗码记录', icon: 'fa-history', color: 'pink', parent: 'menu:commission' },
+    'risk_rule': { name: '风控规则', icon: 'fa-shield-alt', color: 'red', parent: 'menu:risk' },
+    'risk_alert': { name: '风控告警', icon: 'fa-exclamation-triangle', color: 'red', parent: 'menu:risk' },
+    'risk_limit': { name: '限红设置', icon: 'fa-hand-paper', color: 'red', parent: 'menu:risk' },
+    'report': { name: '报表中心', icon: 'fa-chart-bar', color: 'teal', parent: 'menu:report' },
+    'content_announcement': { name: '公告管理', icon: 'fa-bullhorn', color: 'orange', parent: 'menu:content' },
+    'system_admin': { name: '账号管理', icon: 'fa-user-cog', color: 'gray', parent: 'menu:system' },
+    'system_role': { name: '角色权限', icon: 'fa-user-shield', color: 'gray', parent: 'menu:system' },
+    'system_2fa': { name: '2FA设置', icon: 'fa-lock', color: 'gray', parent: 'menu:system' },
+    'system_whitelist': { name: 'IP白名单', icon: 'fa-shield-alt', color: 'gray', parent: 'menu:system' },
+    'system_log': { name: '日志管理', icon: 'fa-history', color: 'gray', parent: 'menu:system' },
+    'studio_dealer': { name: '荷官管理', icon: 'fa-user', color: 'cyan', parent: 'menu:studio' },
+    'studio_table': { name: '桌台管理', icon: 'fa-table', color: 'cyan', parent: 'menu:studio' },
+    'studio_shift': { name: '排班管理', icon: 'fa-calendar-alt', color: 'cyan', parent: 'menu:studio' }
+};
+
+// 一级菜单映射
+const menuMapping = {
+    'menu:dashboard': { name: '仪表盘', icon: 'fa-tachometer-alt', modules: ['dashboard'] },
+    'menu:hierarchy': { name: '层级管理', icon: 'fa-sitemap', modules: ['player', 'agent'] },
+    'menu:finance': { name: '财务管理', icon: 'fa-yen-sign', modules: ['finance_transaction', 'finance_deposit', 'finance_withdraw', 'finance_turnover'] },
+    'menu:bet': { name: '注单管理', icon: 'fa-dice', modules: ['bet'] },
+    'menu:commission': { name: '洗码管理', icon: 'fa-percentage', modules: ['commission_scheme', 'commission_record'] },
+    'menu:risk': { name: '风控管理', icon: 'fa-shield-alt', modules: ['risk_rule', 'risk_alert', 'risk_limit'] },
+    'menu:report': { name: '报表中心', icon: 'fa-chart-bar', modules: ['report'] },
+    'menu:content': { name: '内容管理', icon: 'fa-newspaper', modules: ['content_announcement'] },
+    'menu:system': { name: '系统控制', icon: 'fa-cogs', modules: ['system_admin', 'system_role', 'system_2fa', 'system_whitelist', 'system_log'] },
+    'menu:studio': { name: '现场运营', icon: 'fa-video', modules: ['studio_dealer', 'studio_table', 'studio_shift'] }
+};
+
 function showAddRole() {
-    openModal(`
-        <div class="p-6" style="min-width: 500px;">
-            <h3 class="text-lg font-bold mb-4"><i class="fas fa-user-shield text-indigo-500 mr-2"></i>新增角色</h3>
-            <form id="roleForm" class="space-y-4">
+    showModal(`
+        <h3 class="text-lg font-bold mb-4"><i class="fas fa-user-shield text-indigo-500 mr-2"></i>新增角色</h3>
+        <form id="roleForm" class="space-y-4">
+            <div class="grid grid-cols-2 gap-4">
                 <div><label class="block text-sm font-medium text-gray-700 mb-1">角色名称 <span class="text-red-500">*</span></label><input type="text" id="roleName" class="form-input w-full" placeholder="如：财务主管" required></div>
                 <div><label class="block text-sm font-medium text-gray-700 mb-1">描述</label><input type="text" id="roleDesc" class="form-input w-full" placeholder="角色描述"></div>
-                <div><label class="block text-sm font-medium text-gray-700 mb-2">分配权限</label><div id="permissionCheckboxes" class="border rounded-lg p-4 max-h-64 overflow-y-auto bg-gray-50"><div class="text-center text-gray-500 py-2">加载权限列表...</div></div></div>
-                <div class="flex justify-end gap-3 pt-4 border-t">
-                    <button type="button" onclick="closeModal()" class="btn btn-secondary">取消</button>
-                    <button type="submit" class="btn btn-primary"><i class="fas fa-save mr-1"></i>保存</button>
+            </div>
+            <div>
+                <div class="flex items-center justify-between mb-2">
+                    <label class="text-sm font-medium text-gray-700">分配权限</label>
+                    <div class="space-x-2">
+                        <button type="button" onclick="selectAllPermissions(true)" class="text-xs text-blue-500 hover:underline">全选</button>
+                        <button type="button" onclick="selectAllPermissions(false)" class="text-xs text-gray-500 hover:underline">清空</button>
+                    </div>
                 </div>
-            </form>
-        </div>
-    `);
+                <div id="permissionCheckboxes" class="border rounded-lg bg-gray-50 max-h-[500px] overflow-y-auto">
+                    <div class="text-center text-gray-500 py-4">加载权限列表...</div>
+                </div>
+            </div>
+            <div class="flex justify-end gap-3 pt-4 border-t">
+                <button type="button" onclick="closeModal()" class="btn btn-secondary">取消</button>
+                <button type="submit" class="btn btn-primary"><i class="fas fa-save mr-1"></i>保存</button>
+            </div>
+        </form>
+    `, 'max-w-4xl');
     loadPermissionsForRole();
     document.getElementById('roleForm').onsubmit = async (e) => { e.preventDefault(); await submitRole(); };
 }
@@ -3572,22 +3635,182 @@ async function loadPermissionsForRole(selectedPerms = []) {
         const res = await apiRequest('/admin/permissions');
         const perms = res.data || [];
         const container = document.getElementById('permissionCheckboxes');
-        const permGroups = {};
-        perms.forEach(p => { const g = p.permission_code?.split(':')[0] || 'other'; if (!permGroups[g]) permGroups[g] = []; permGroups[g].push(p); });
-        container.innerHTML = Object.entries(permGroups).map(([group, items]) => `
-            <div class="mb-3"><div class="font-semibold text-gray-700 mb-2 uppercase text-xs">${group}</div><div class="grid grid-cols-2 gap-2">${items.map(p => `<label class="flex items-center space-x-2 text-sm cursor-pointer hover:bg-white p-1 rounded"><input type="checkbox" name="perms" value="${p.permission_code}" ${selectedPerms.includes(p.permission_code) ? 'checked' : ''} class="rounded border-gray-300"><span>${escapeHtml(p.permission_name)}</span></label>`).join('')}</div></div>
-        `).join('');
-    } catch (error) { document.getElementById('permissionCheckboxes').innerHTML = '<div class="text-red-500 text-center">加载失败</div>'; }
+        
+        // 分离一级菜单权限和细分权限
+        const menuPerms = perms.filter(p => p.module === 'menu');
+        const detailPerms = perms.filter(p => p.module !== 'menu');
+        
+        // 按module分组细分权限
+        const groupedPerms = {};
+        detailPerms.forEach(p => {
+            if (!groupedPerms[p.module]) groupedPerms[p.module] = [];
+            groupedPerms[p.module].push(p);
+        });
+        
+        // 生成HTML - 按一级菜单分组
+        let html = '';
+        Object.entries(menuMapping).forEach(([menuCode, menuInfo]) => {
+            const menuPerm = menuPerms.find(p => p.permission_code === menuCode);
+            if (!menuPerm) return;
+            
+            const isMenuChecked = selectedPerms.includes(String(menuPerm.permission_id));
+            
+            html += `
+                <div class="border-b last:border-b-0">
+                    <div class="flex items-center p-3 bg-gray-100 hover:bg-gray-200 cursor-pointer" onclick="togglePermissionGroup('${menuCode}')">
+                        <i class="fas fa-chevron-down text-gray-400 mr-2 transition-transform" id="icon-${menuCode.replace(':', '-')}"></i>
+                        <label class="flex items-center flex-1 cursor-pointer" onclick="event.stopPropagation()">
+                            <input type="checkbox" name="perms" value="${menuPerm.permission_id}" 
+                                   ${isMenuChecked ? 'checked' : ''} 
+                                   class="rounded border-gray-300 mr-2 menu-perm" 
+                                   data-menu="${menuCode}"
+                                   onchange="toggleMenuPermission('${menuCode}', this.checked)">
+                            <i class="fas ${menuInfo.icon} text-indigo-500 mr-2"></i>
+                            <span class="font-semibold">${menuInfo.name}</span>
+                        </label>
+                        <span class="text-xs text-gray-500" id="count-${menuCode.replace(':', '-')}">0 / 0</span>
+                    </div>
+                    <div class="p-3 hidden" id="group-${menuCode.replace(':', '-')}">
+            `;
+            
+            // 添加该一级菜单下的所有模块
+            menuInfo.modules.forEach(moduleName => {
+                const modulePerms = groupedPerms[moduleName] || [];
+                if (modulePerms.length === 0) return;
+                
+                const moduleInfo = permissionStructure[moduleName] || { name: moduleName, icon: 'fa-circle', color: 'gray' };
+                
+                html += `
+                    <div class="mb-3 last:mb-0">
+                        <div class="flex items-center mb-2 pb-1 border-b border-gray-200">
+                            <label class="flex items-center cursor-pointer">
+                                <input type="checkbox" class="module-select-all rounded border-gray-300 mr-2" 
+                                       data-module="${moduleName}" data-menu="${menuCode}"
+                                       onchange="toggleModulePermissions('${moduleName}', '${menuCode}', this.checked)">
+                                <i class="fas ${moduleInfo.icon} text-${moduleInfo.color}-500 mr-2 text-sm"></i>
+                                <span class="text-sm font-medium text-gray-700">${moduleInfo.name}</span>
+                            </label>
+                        </div>
+                        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 pl-6">
+                            ${modulePerms.map(p => `
+                                <label class="flex items-center text-sm cursor-pointer hover:bg-white p-1 rounded">
+                                    <input type="checkbox" name="perms" value="${p.permission_id}" 
+                                           ${selectedPerms.includes(String(p.permission_id)) ? 'checked' : ''} 
+                                           class="rounded border-gray-300 mr-2 detail-perm" 
+                                           data-module="${moduleName}" data-menu="${menuCode}"
+                                           onchange="updatePermissionCounts('${menuCode}')">
+                                    <span class="text-gray-600">${escapeHtml(p.permission_name)}</span>
+                                </label>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += `</div></div>`;
+        });
+        
+        container.innerHTML = html || '<div class="text-center text-gray-500 py-4">暂无权限数据</div>';
+        
+        // 更新所有计数
+        Object.keys(menuMapping).forEach(menuCode => {
+            updatePermissionCounts(menuCode);
+            updateModuleCheckboxes(menuCode);
+        });
+        
+    } catch (error) { 
+        document.getElementById('permissionCheckboxes').innerHTML = '<div class="text-red-500 text-center py-4">加载失败: ' + error.message + '</div>'; 
+    }
+}
+
+// 展开/收起权限组
+function togglePermissionGroup(menuCode) {
+    const groupId = 'group-' + menuCode.replace(':', '-');
+    const iconId = 'icon-' + menuCode.replace(':', '-');
+    const group = document.getElementById(groupId);
+    const icon = document.getElementById(iconId);
+    if (group.classList.contains('hidden')) {
+        group.classList.remove('hidden');
+        icon.style.transform = 'rotate(0deg)';
+    } else {
+        group.classList.add('hidden');
+        icon.style.transform = 'rotate(-90deg)';
+    }
+}
+
+// 切换一级菜单权限时，联动子权限
+function toggleMenuPermission(menuCode, checked) {
+    const detailPerms = document.querySelectorAll(`input.detail-perm[data-menu="${menuCode}"]`);
+    const moduleCheckboxes = document.querySelectorAll(`input.module-select-all[data-menu="${menuCode}"]`);
+    
+    detailPerms.forEach(cb => cb.checked = checked);
+    moduleCheckboxes.forEach(cb => cb.checked = checked);
+    updatePermissionCounts(menuCode);
+}
+
+// 切换模块全选
+function toggleModulePermissions(moduleName, menuCode, checked) {
+    const modulePerms = document.querySelectorAll(`input.detail-perm[data-module="${moduleName}"]`);
+    modulePerms.forEach(cb => cb.checked = checked);
+    updatePermissionCounts(menuCode);
+    
+    // 如果勾选了模块下的任意权限，自动勾选一级菜单
+    if (checked) {
+        const menuPerm = document.querySelector(`input.menu-perm[data-menu="${menuCode}"]`);
+        if (menuPerm) menuPerm.checked = true;
+    }
+}
+
+// 更新权限计数
+function updatePermissionCounts(menuCode) {
+    const countId = 'count-' + menuCode.replace(':', '-');
+    const countEl = document.getElementById(countId);
+    if (!countEl) return;
+    
+    const total = document.querySelectorAll(`input.detail-perm[data-menu="${menuCode}"]`).length;
+    const checked = document.querySelectorAll(`input.detail-perm[data-menu="${menuCode}"]:checked`).length;
+    countEl.textContent = `${checked} / ${total}`;
+    
+    // 更新模块全选状态
+    updateModuleCheckboxes(menuCode);
+}
+
+// 更新模块全选checkbox状态
+function updateModuleCheckboxes(menuCode) {
+    const modules = menuMapping[menuCode]?.modules || [];
+    modules.forEach(moduleName => {
+        const moduleCheckbox = document.querySelector(`input.module-select-all[data-module="${moduleName}"]`);
+        if (!moduleCheckbox) return;
+        
+        const modulePerms = document.querySelectorAll(`input.detail-perm[data-module="${moduleName}"]`);
+        const checkedPerms = document.querySelectorAll(`input.detail-perm[data-module="${moduleName}"]:checked`);
+        
+        moduleCheckbox.checked = modulePerms.length > 0 && modulePerms.length === checkedPerms.length;
+        moduleCheckbox.indeterminate = checkedPerms.length > 0 && checkedPerms.length < modulePerms.length;
+    });
+}
+
+// 全选/清空权限
+function selectAllPermissions(select) {
+    document.querySelectorAll('input[name="perms"]').forEach(cb => cb.checked = select);
+    document.querySelectorAll('input.module-select-all').forEach(cb => cb.checked = select);
+    Object.keys(menuMapping).forEach(menuCode => updatePermissionCounts(menuCode));
 }
 
 async function submitRole(roleId = null) {
     const selectedPerms = Array.from(document.querySelectorAll('input[name="perms"]:checked')).map(cb => cb.value);
-    const data = { role_name: document.getElementById('roleName').value.trim(), description: document.getElementById('roleDesc').value.trim() || null, permissions: selectedPerms.join(',') };
+    const data = { 
+        role_name: document.getElementById('roleName').value.trim(), 
+        description: document.getElementById('roleDesc').value.trim() || null, 
+        permissions: selectedPerms.join(',') 
+    };
     if (!data.role_name) { alert('请输入角色名称'); return; }
+    if (selectedPerms.length === 0) { alert('请至少选择一个权限'); return; }
+    
     try {
         const url = roleId ? `/admin/roles/${roleId}` : '/admin/roles';
         const res = await apiRequest(url, { method: roleId ? 'PUT' : 'POST', body: JSON.stringify(data) });
-        if (res.success) { closeModal(); alert(roleId ? '角色更新成功' : '角色创建成功'); loadPage('admin-roles'); }
+        if (res.success) { closeModal(); alert(roleId ? '角色更新成功' : '角色创建成功'); loadPage('system-roles'); }
         else { alert(res.message || '操作失败'); }
     } catch (error) { alert('操作失败: ' + error.message); }
 }
@@ -3601,9 +3824,9 @@ async function editRole(roleId) {
         setTimeout(async () => {
             document.getElementById('roleName').value = r.role_name || '';
             document.getElementById('roleDesc').value = r.description || '';
-            const perms = r.permissions ? r.permissions.split(',') : [];
+            const perms = r.permissions ? r.permissions.split(',').map(p => p.trim()) : [];
             await loadPermissionsForRole(perms);
-            document.querySelector('#roleForm').previousElementSibling.innerHTML = '<i class="fas fa-user-shield text-indigo-500 mr-2"></i>编辑角色';
+            document.querySelector('#roleForm').previousElementSibling.innerHTML = '<i class="fas fa-user-shield text-indigo-500 mr-2"></i>编辑角色 - ' + escapeHtml(r.role_name);
             document.getElementById('roleForm').onsubmit = async (e) => { e.preventDefault(); await submitRole(roleId); };
         }, 100);
     } catch (error) { alert('获取详情失败: ' + error.message); }
@@ -3618,7 +3841,7 @@ async function deleteRole(roleId, roleName) {
     } catch (error) { alert('删除失败: ' + error.message); }
 }
 
-// 角色权限管理 - 增强版
+// 角色权限管理 - 增强版渲染
 async function renderRolesEnhanced() {
     const content = document.getElementById('pageContent');
     try {
@@ -3629,55 +3852,148 @@ async function renderRolesEnhanced() {
         const roles = rolesData.data || [];
         const permissions = permsData.data || [];
         
+        // 统计一级菜单和细分权限数量
+        const menuCount = permissions.filter(p => p.module === 'menu').length;
+        const detailCount = permissions.filter(p => p.module !== 'menu').length;
+        
         content.innerHTML = `
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="space-y-6">
                 <div class="card">
                     <div class="card-header flex items-center justify-between">
-                        <h3 class="text-lg font-semibold"><i class="fas fa-user-shield mr-2"></i>角色管理</h3>
+                        <h3 class="text-lg font-semibold"><i class="fas fa-user-shield mr-2 text-indigo-500"></i>角色管理</h3>
                         <button onclick="showAddRole()" class="btn btn-primary text-sm"><i class="fas fa-plus mr-1"></i>新增角色</button>
                     </div>
                     <div class="p-4">
                         <table class="data-table">
-                            <thead><tr><th>角色名称</th><th>描述</th><th>用户数</th><th>操作</th></tr></thead>
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>角色名称</th>
+                                    <th>描述</th>
+                                    <th>权限数</th>
+                                    <th>用户数</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
                             <tbody>
-                                ${roles.length === 0 ? '<tr><td colspan="4" class="text-center text-gray-500 py-4">暂无角色</td></tr>' : 
-                                roles.map(r => `
+                                ${roles.length === 0 ? '<tr><td colspan="6" class="text-center text-gray-500 py-4">暂无角色</td></tr>' : 
+                                roles.map(r => {
+                                    const permCount = r.permissions ? r.permissions.split(',').length : 0;
+                                    return `
                                     <tr>
+                                        <td class="text-gray-500">${r.role_id}</td>
                                         <td class="font-semibold">${escapeHtml(r.role_name || '')}</td>
                                         <td class="text-sm text-gray-600">${escapeHtml(r.description || '-')}</td>
+                                        <td><span class="badge badge-success">${permCount}</span></td>
                                         <td><span class="badge badge-info">${r.user_count || 0}</span></td>
-                                        <td>
-                                            <button onclick="editRole(${r.role_id})" class="text-blue-500 hover:text-blue-700 mr-2" title="编辑"><i class="fas fa-edit"></i></button>
-                                            ${r.role_id > 2 ? `<button onclick="deleteRole(${r.role_id}, '${escapeAttr(r.role_name)}')" class="text-red-500 hover:text-red-700" title="删除"><i class="fas fa-trash"></i></button>` : ''}
+                                        <td class="space-x-1">
+                                            <button onclick="editRole(${r.role_id})" class="text-blue-500 hover:text-blue-700" title="编辑权限"><i class="fas fa-edit"></i></button>
+                                            <button onclick="viewRolePermissions(${r.role_id}, '${escapeAttr(r.role_name)}')" class="text-green-500 hover:text-green-700" title="查看权限"><i class="fas fa-key"></i></button>
+                                            ${r.role_id > 3 ? `<button onclick="deleteRole(${r.role_id}, '${escapeAttr(r.role_name)}')" class="text-red-500 hover:text-red-700" title="删除"><i class="fas fa-trash"></i></button>` : ''}
                                         </td>
                                     </tr>
-                                `).join('')}
+                                `}).join('')}
                             </tbody>
                         </table>
                     </div>
                 </div>
+                
                 <div class="card">
-                    <div class="card-header"><h3 class="text-lg font-semibold"><i class="fas fa-key mr-2"></i>权限列表 (${permissions.length})</h3></div>
-                    <div class="p-4 max-h-96 overflow-y-auto">
-                        ${Object.entries(permissions.reduce((acc, p) => {
-                            const mod = p.module || '其他';
-                            if (!acc[mod]) acc[mod] = [];
-                            acc[mod].push(p);
-                            return acc;
-                        }, {})).map(([module, perms]) => `
-                            <div class="mb-4">
-                                <h4 class="font-medium text-gray-700 mb-2">${escapeHtml(module)}</h4>
-                                <div class="flex flex-wrap gap-2">
-                                    ${perms.map(p => `<span class="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded" title="${escapeAttr(p.permission_code || '')}">${escapeHtml(p.permission_name || '')}</span>`).join('')}
-                                </div>
-                            </div>
-                        `).join('')}
+                    <div class="card-header">
+                        <h3 class="text-lg font-semibold">
+                            <i class="fas fa-key mr-2 text-yellow-500"></i>权限总览 
+                            <span class="text-sm font-normal text-gray-500 ml-2">
+                                (${menuCount} 个一级菜单 / ${detailCount} 个细分权限)
+                            </span>
+                        </h3>
+                    </div>
+                    <div class="p-4">
+                        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                            ${Object.entries(menuMapping).map(([menuCode, menuInfo]) => {
+                                const modulePerms = menuInfo.modules.flatMap(m => permissions.filter(p => p.module === m));
+                                return `
+                                    <div class="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition">
+                                        <div class="flex items-center mb-2">
+                                            <i class="fas ${menuInfo.icon} text-indigo-500 mr-2"></i>
+                                            <span class="font-medium text-sm">${menuInfo.name}</span>
+                                        </div>
+                                        <div class="text-xs text-gray-500">
+                                            ${menuInfo.modules.map(m => {
+                                                const count = permissions.filter(p => p.module === m).length;
+                                                const info = permissionStructure[m] || { name: m };
+                                                return `<div class="flex justify-between"><span>${info.name}</span><span class="text-indigo-600">${count}</span></div>`;
+                                            }).join('')}
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
                     </div>
                 </div>
             </div>
         `;
     } catch (error) {
         content.innerHTML = '<div class="text-center text-red-500 py-10">加载失败: ' + escapeHtml(error.message) + '</div>';
+    }
+}
+
+// 查看角色权限详情
+async function viewRolePermissions(roleId, roleName) {
+    try {
+        const [roleRes, permsRes] = await Promise.all([
+            apiRequest(`/admin/roles/${roleId}`),
+            apiRequest('/admin/permissions')
+        ]);
+        
+        if (!roleRes.success) { alert('获取角色信息失败'); return; }
+        
+        const role = roleRes.data;
+        const allPerms = permsRes.data || [];
+        const rolePermIds = role.permissions ? role.permissions.split(',').map(p => p.trim()) : [];
+        const rolePerms = allPerms.filter(p => rolePermIds.includes(String(p.permission_id)));
+        
+        // 按一级菜单分组显示
+        let html = `<h3 class="text-lg font-bold mb-4"><i class="fas fa-key text-yellow-500 mr-2"></i>${escapeHtml(roleName)} - 权限详情</h3>`;
+        html += `<div class="max-h-[500px] overflow-y-auto space-y-3">`;
+        
+        Object.entries(menuMapping).forEach(([menuCode, menuInfo]) => {
+            const menuPerm = rolePerms.find(p => p.permission_code === menuCode);
+            if (!menuPerm) return;
+            
+            const modulePerms = menuInfo.modules.flatMap(m => rolePerms.filter(p => p.module === m));
+            
+            html += `
+                <div class="border rounded-lg overflow-hidden">
+                    <div class="bg-indigo-50 px-3 py-2 flex items-center">
+                        <i class="fas ${menuInfo.icon} text-indigo-500 mr-2"></i>
+                        <span class="font-semibold">${menuInfo.name}</span>
+                        <span class="ml-auto badge badge-info">${modulePerms.length} 权限</span>
+                    </div>
+                    <div class="p-3">
+                        ${menuInfo.modules.map(moduleName => {
+                            const modPerms = rolePerms.filter(p => p.module === moduleName);
+                            if (modPerms.length === 0) return '';
+                            const modInfo = permissionStructure[moduleName] || { name: moduleName };
+                            return `
+                                <div class="mb-2 last:mb-0">
+                                    <div class="text-sm font-medium text-gray-600 mb-1">${modInfo.name}</div>
+                                    <div class="flex flex-wrap gap-1">
+                                        ${modPerms.map(p => `<span class="px-2 py-0.5 bg-gray-100 text-gray-700 text-xs rounded">${escapeHtml(p.permission_name)}</span>`).join('')}
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `</div>`;
+        html += `<div class="flex justify-end mt-4 pt-4 border-t"><button onclick="closeModal()" class="btn btn-secondary">关闭</button></div>`;
+        
+        showModal(html, 'max-w-2xl');
+    } catch (error) {
+        alert('加载失败: ' + error.message);
     }
 }
 
