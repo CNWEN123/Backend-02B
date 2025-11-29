@@ -3667,6 +3667,385 @@ app.get('/api/v1/dashboard/history', async (c) => {
   }
 })
 
+// ==================== 增强版报表API ====================
+
+// 综合数据报表 - 支持股东/代理/公司盈亏、佣金数据
+app.get('/api/v1/reports/comprehensive', async (c) => {
+  const start_date = c.req.query('start_date') || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  const end_date = c.req.query('end_date') || new Date().toISOString().split('T')[0]
+  const agent_id = c.req.query('agent_id')
+  const shareholder_id = c.req.query('shareholder_id')
+
+  try {
+    // 构建查询条件
+    let whereClause = 'WHERE DATE(b.created_at) BETWEEN ? AND ? AND b.bet_status = 1'
+    const params: any[] = [start_date, end_date]
+    
+    if (agent_id) {
+      whereClause += ' AND u.agent_id = ?'
+      params.push(parseInt(agent_id))
+    }
+    if (shareholder_id) {
+      whereClause += ' AND a.parent_agent_id = ?'
+      params.push(parseInt(shareholder_id))
+    }
+
+    // 获取综合统计
+    const summaryResult = await c.env.DB.prepare(`
+      SELECT 
+        COUNT(DISTINCT b.user_id) as active_players,
+        COUNT(*) as total_bets,
+        COALESCE(SUM(b.bet_amount), 0) as total_bet_amount,
+        COALESCE(SUM(b.valid_bet_amount), 0) as valid_bet_amount,
+        COALESCE(SUM(b.win_loss_amount), 0) as player_win_loss,
+        -COALESCE(SUM(b.win_loss_amount), 0) as company_profit
+      FROM bets b
+      LEFT JOIN users u ON b.user_id = u.user_id
+      LEFT JOIN agents a ON u.agent_id = a.agent_id
+      ${whereClause}
+    `).bind(...params).first()
+
+    // 获取股东盈亏分布
+    const shareholderResult = await c.env.DB.prepare(`
+      SELECT 
+        sh.agent_id as shareholder_id,
+        sh.agent_username as shareholder_name,
+        sh.share_ratio,
+        COUNT(DISTINCT b.user_id) as player_count,
+        COUNT(*) as bet_count,
+        COALESCE(SUM(b.bet_amount), 0) as total_bet,
+        COALESCE(SUM(b.valid_bet_amount), 0) as valid_bet,
+        COALESCE(SUM(b.win_loss_amount), 0) as player_win_loss,
+        -COALESCE(SUM(b.win_loss_amount), 0) as company_profit,
+        ROUND(-SUM(b.win_loss_amount) * sh.share_ratio / 100, 2) as shareholder_profit,
+        ROUND(-SUM(b.win_loss_amount) * (100 - sh.share_ratio) / 100, 2) as platform_profit
+      FROM agents sh
+      LEFT JOIN agents a ON a.parent_agent_id = sh.agent_id
+      LEFT JOIN users u ON u.agent_id = a.agent_id OR u.agent_id = sh.agent_id
+      LEFT JOIN bets b ON b.user_id = u.user_id AND DATE(b.created_at) BETWEEN ? AND ? AND b.bet_status = 1
+      WHERE sh.level = 1
+      GROUP BY sh.agent_id
+      ORDER BY company_profit DESC
+    `).bind(start_date, end_date).all()
+
+    // 获取代理盈亏分布
+    const agentResult = await c.env.DB.prepare(`
+      SELECT 
+        a.agent_id,
+        a.agent_username,
+        a.level,
+        a.commission_ratio,
+        sh.agent_username as shareholder_name,
+        COUNT(DISTINCT b.user_id) as player_count,
+        COUNT(*) as bet_count,
+        COALESCE(SUM(b.bet_amount), 0) as total_bet,
+        COALESCE(SUM(b.valid_bet_amount), 0) as valid_bet,
+        COALESCE(SUM(b.win_loss_amount), 0) as player_win_loss,
+        -COALESCE(SUM(b.win_loss_amount), 0) as company_profit,
+        ROUND(-SUM(b.win_loss_amount) * a.commission_ratio / 100, 2) as commission_earned
+      FROM agents a
+      LEFT JOIN agents sh ON a.parent_agent_id = sh.agent_id
+      LEFT JOIN users u ON u.agent_id = a.agent_id
+      LEFT JOIN bets b ON b.user_id = u.user_id AND DATE(b.created_at) BETWEEN ? AND ? AND b.bet_status = 1
+      WHERE a.level > 1 OR a.parent_agent_id IS NULL
+      GROUP BY a.agent_id
+      ORDER BY company_profit DESC
+      LIMIT 100
+    `).bind(start_date, end_date).all()
+
+    // 获取每日趋势数据
+    const dailyTrend = await c.env.DB.prepare(`
+      SELECT 
+        DATE(b.created_at) as date,
+        COUNT(*) as bet_count,
+        COALESCE(SUM(b.bet_amount), 0) as total_bet,
+        COALESCE(SUM(b.valid_bet_amount), 0) as valid_bet,
+        COALESCE(SUM(b.win_loss_amount), 0) as player_win_loss,
+        -COALESCE(SUM(b.win_loss_amount), 0) as company_profit
+      FROM bets b
+      LEFT JOIN users u ON b.user_id = u.user_id
+      LEFT JOIN agents a ON u.agent_id = a.agent_id
+      ${whereClause}
+      GROUP BY DATE(b.created_at)
+      ORDER BY date DESC
+    `).bind(...params).all()
+
+    // 获取佣金汇总
+    const commissionTotal = (agentResult.results || []).reduce((sum: number, a: any) => 
+      sum + parseFloat(a.commission_earned || 0), 0)
+
+    return c.json({
+      success: true,
+      data: {
+        summary: {
+          ...summaryResult,
+          total_commission: commissionTotal
+        },
+        shareholders: shareholderResult.results || [],
+        agents: agentResult.results || [],
+        daily_trend: dailyTrend.results || []
+      }
+    })
+  } catch (error) {
+    console.error('获取综合报表失败:', error)
+    return c.json({ success: false, message: '获取综合报表失败' }, 500)
+  }
+})
+
+// 注单明细查询API - 支持完整筛选条件
+app.get('/api/v1/reports/bet-details', async (c) => {
+  const start_date = c.req.query('start_date') || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  const end_date = c.req.query('end_date') || new Date().toISOString().split('T')[0]
+  const bet_id = c.req.query('bet_id')
+  const username = c.req.query('username')
+  const agent_id = c.req.query('agent_id')
+  const shareholder_id = c.req.query('shareholder_id')
+  const game_type = c.req.query('game_type')
+  const table_id = c.req.query('table_id')
+  const bet_area = c.req.query('bet_area')
+  const min_amount = c.req.query('min_amount')
+  const max_amount = c.req.query('max_amount')
+  const page = parseInt(c.req.query('page') || '1')
+  const pageSize = parseInt(c.req.query('pageSize') || '50')
+
+  try {
+    let whereClause = 'WHERE DATE(b.created_at) BETWEEN ? AND ?'
+    const params: any[] = [start_date, end_date]
+    
+    if (bet_id) {
+      whereClause += ' AND b.bet_id = ?'
+      params.push(bet_id)
+    }
+    if (username) {
+      whereClause += ' AND u.username LIKE ?'
+      params.push(`%${username}%`)
+    }
+    if (agent_id) {
+      whereClause += ' AND u.agent_id = ?'
+      params.push(parseInt(agent_id))
+    }
+    if (shareholder_id) {
+      whereClause += ' AND a.parent_agent_id = ?'
+      params.push(parseInt(shareholder_id))
+    }
+    if (game_type) {
+      whereClause += ' AND b.game_type = ?'
+      params.push(game_type)
+    }
+    if (table_id) {
+      whereClause += ' AND b.table_code = ?'
+      params.push(table_id)
+    }
+    if (bet_area) {
+      whereClause += ' AND b.bet_detail LIKE ?'
+      params.push(`%${bet_area}%`)
+    }
+    if (min_amount) {
+      whereClause += ' AND b.bet_amount >= ?'
+      params.push(parseFloat(min_amount))
+    }
+    if (max_amount) {
+      whereClause += ' AND b.bet_amount <= ?'
+      params.push(parseFloat(max_amount))
+    }
+
+    // 获取总数
+    const countResult = await c.env.DB.prepare(`
+      SELECT COUNT(*) as total 
+      FROM bets b
+      LEFT JOIN users u ON b.user_id = u.user_id
+      LEFT JOIN agents a ON u.agent_id = a.agent_id
+      ${whereClause} AND b.bet_status = 1
+    `).bind(...params).first()
+
+    // 获取列表数据
+    const offset = (page - 1) * pageSize
+    const listResult = await c.env.DB.prepare(`
+      SELECT 
+        b.bet_id,
+        b.bet_no,
+        b.game_round_id as round_id,
+        b.game_type,
+        b.table_code as table_id,
+        b.bet_detail as bet_area,
+        b.bet_amount,
+        b.valid_bet_amount,
+        b.win_loss_amount,
+        b.bet_status,
+        b.created_at,
+        b.settle_at as settled_at,
+        u.user_id,
+        u.username,
+        u.vip_level,
+        a.agent_id,
+        a.agent_username,
+        sh.agent_username as shareholder_name,
+        sh.share_ratio
+      FROM bets b
+      LEFT JOIN users u ON b.user_id = u.user_id
+      LEFT JOIN agents a ON u.agent_id = a.agent_id
+      LEFT JOIN agents sh ON a.parent_agent_id = sh.agent_id
+      ${whereClause} AND b.bet_status = 1
+      ORDER BY b.created_at DESC
+      LIMIT ? OFFSET ?
+    `).bind(...params, pageSize, offset).all()
+
+    // 计算汇总
+    const summaryResult = await c.env.DB.prepare(`
+      SELECT 
+        COUNT(*) as total_bets,
+        COUNT(DISTINCT b.user_id) as player_count,
+        COALESCE(SUM(b.bet_amount), 0) as total_bet,
+        COALESCE(SUM(b.valid_bet_amount), 0) as valid_bet,
+        COALESCE(SUM(b.win_loss_amount), 0) as player_win_loss,
+        -COALESCE(SUM(b.win_loss_amount), 0) as company_profit
+      FROM bets b
+      LEFT JOIN users u ON b.user_id = u.user_id
+      LEFT JOIN agents a ON u.agent_id = a.agent_id
+      ${whereClause} AND b.bet_status = 1
+    `).bind(...params).first()
+
+    return c.json({
+      success: true,
+      data: {
+        list: listResult.results || [],
+        total: countResult?.total || 0,
+        page,
+        pageSize,
+        summary: summaryResult
+      }
+    })
+  } catch (error) {
+    console.error('获取注单明细失败:', error)
+    return c.json({ success: false, message: '获取注单明细失败' }, 500)
+  }
+})
+
+// 获取下注区域统计
+app.get('/api/v1/reports/bet-area-stats', async (c) => {
+  const start_date = c.req.query('start_date') || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  const end_date = c.req.query('end_date') || new Date().toISOString().split('T')[0]
+  const game_type = c.req.query('game_type')
+
+  try {
+    let whereClause = 'WHERE DATE(created_at) BETWEEN ? AND ? AND bet_status = 1'
+    const params: any[] = [start_date, end_date]
+    
+    if (game_type) {
+      whereClause += ' AND game_type = ?'
+      params.push(game_type)
+    }
+
+    const result = await c.env.DB.prepare(`
+      SELECT 
+        game_type,
+        bet_detail as bet_area,
+        COUNT(*) as bet_count,
+        COUNT(DISTINCT user_id) as player_count,
+        COALESCE(SUM(bet_amount), 0) as total_bet,
+        COALESCE(SUM(valid_bet_amount), 0) as valid_bet,
+        COALESCE(SUM(win_loss_amount), 0) as player_win_loss,
+        -COALESCE(SUM(win_loss_amount), 0) as company_profit,
+        ROUND(-SUM(win_loss_amount) * 100.0 / NULLIF(SUM(valid_bet_amount), 0), 2) as profit_rate
+      FROM bets
+      ${whereClause}
+      GROUP BY game_type, bet_detail
+      ORDER BY total_bet DESC
+    `).bind(...params).all()
+
+    return c.json({ success: true, data: result.results || [] })
+  } catch (error) {
+    console.error('获取下注区域统计失败:', error)
+    return c.json({ success: false, message: '获取下注区域统计失败' }, 500)
+  }
+})
+
+// 获取桌台统计
+app.get('/api/v1/reports/table-stats', async (c) => {
+  const start_date = c.req.query('start_date') || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  const end_date = c.req.query('end_date') || new Date().toISOString().split('T')[0]
+
+  try {
+    const result = await c.env.DB.prepare(`
+      SELECT 
+        b.table_code as table_id,
+        b.table_code as table_name,
+        b.game_type,
+        COUNT(*) as bet_count,
+        COUNT(DISTINCT b.user_id) as player_count,
+        COALESCE(SUM(b.bet_amount), 0) as total_bet,
+        COALESCE(SUM(b.valid_bet_amount), 0) as valid_bet,
+        COALESCE(SUM(b.win_loss_amount), 0) as player_win_loss,
+        -COALESCE(SUM(b.win_loss_amount), 0) as company_profit,
+        ROUND(-SUM(b.win_loss_amount) * 100.0 / NULLIF(SUM(b.valid_bet_amount), 0), 2) as profit_rate
+      FROM bets b
+      WHERE DATE(b.created_at) BETWEEN ? AND ? AND b.bet_status = 1
+      GROUP BY b.table_code
+      ORDER BY total_bet DESC
+    `).bind(start_date, end_date).all()
+
+    return c.json({ success: true, data: result.results || [] })
+  } catch (error) {
+    console.error('获取桌台统计失败:', error)
+    return c.json({ success: false, message: '获取桌台统计失败' }, 500)
+  }
+})
+
+// 获取股东列表（用于筛选下拉框）
+app.get('/api/v1/reports/shareholders', async (c) => {
+  try {
+    const result = await c.env.DB.prepare(`
+      SELECT agent_id, agent_username, nickname
+      FROM agents
+      WHERE level = 1 OR parent_agent_id IS NULL
+      ORDER BY agent_username ASC
+    `).all()
+
+    return c.json({ success: true, data: result.results || [] })
+  } catch (error) {
+    return c.json({ success: false, message: '获取股东列表失败' }, 500)
+  }
+})
+
+// 获取代理列表（用于筛选下拉框）
+app.get('/api/v1/reports/agents-list', async (c) => {
+  const shareholder_id = c.req.query('shareholder_id')
+  
+  try {
+    let whereClause = 'WHERE 1=1'
+    const params: any[] = []
+    
+    if (shareholder_id) {
+      whereClause += ' AND (parent_agent_id = ? OR agent_id = ?)'
+      params.push(parseInt(shareholder_id), parseInt(shareholder_id))
+    }
+
+    const result = await c.env.DB.prepare(`
+      SELECT agent_id, agent_username, nickname, level, parent_agent_id
+      FROM agents
+      ${whereClause}
+      ORDER BY level ASC, agent_username ASC
+    `).bind(...params).all()
+
+    return c.json({ success: true, data: result.results || [] })
+  } catch (error) {
+    return c.json({ success: false, message: '获取代理列表失败' }, 500)
+  }
+})
+
+// 获取游戏类型列表
+app.get('/api/v1/reports/game-types', async (c) => {
+  try {
+    const result = await c.env.DB.prepare(`
+      SELECT DISTINCT game_type FROM bets ORDER BY game_type ASC
+    `).all()
+
+    return c.json({ success: true, data: result.results || [] })
+  } catch (error) {
+    return c.json({ success: false, message: '获取游戏类型失败' }, 500)
+  }
+})
+
 // ==================== 收款方式管理API ====================
 
 // 获取收款方式列表
