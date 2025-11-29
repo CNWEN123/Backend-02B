@@ -3333,42 +3333,89 @@ async function render2FASettings() {
         const enabled = res.data?.enabled || false;
         
         content.innerHTML = `
-            <div class="card max-w-2xl mx-auto">
-                <div class="card-header">
-                    <h3 class="text-lg font-semibold"><i class="fas fa-shield-alt mr-2 text-green-500"></i>双因素认证 (2FA)</h3>
-                </div>
-                <div class="p-6">
-                    <div class="text-center mb-6">
-                        <div class="w-24 h-24 mx-auto mb-4 rounded-full flex items-center justify-center ${enabled ? 'bg-green-100' : 'bg-gray-100'}">
-                            <i class="fas ${enabled ? 'fa-lock text-green-500' : 'fa-unlock text-gray-400'} text-4xl"></i>
-                        </div>
-                        <h4 class="text-xl font-bold ${enabled ? 'text-green-600' : 'text-gray-600'}">${enabled ? '已启用' : '未启用'}</h4>
-                        <p class="text-gray-500 mt-2">双因素认证为您的账户添加额外的安全层</p>
+            <div class="max-w-3xl mx-auto">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="text-lg font-semibold"><i class="fas fa-shield-alt mr-2 text-green-500"></i>双因素认证 (2FA) 设置</h3>
                     </div>
-                    
-                    ${enabled ? `
-                        <div class="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
-                            <div class="flex items-center">
-                                <i class="fas fa-check-circle text-green-500 mr-3 text-xl"></i>
-                                <div>
-                                    <h5 class="font-medium text-green-800">2FA已激活</h5>
-                                    <p class="text-green-600 text-sm">每次登录都需要验证码</p>
+                    <div class="p-6">
+                        <div class="text-center mb-8">
+                            <div class="w-28 h-28 mx-auto mb-4 rounded-full flex items-center justify-center ${enabled ? 'bg-green-100' : 'bg-gray-100'} shadow-lg">
+                                <i class="fas ${enabled ? 'fa-lock text-green-500' : 'fa-unlock text-gray-400'} text-5xl"></i>
+                            </div>
+                            <h4 class="text-2xl font-bold ${enabled ? 'text-green-600' : 'text-gray-600'}">${enabled ? '✅ 2FA 已启用' : '⚠️ 2FA 未启用'}</h4>
+                            <p class="text-gray-500 mt-2">双因素认证为您的账户添加额外的安全保护层</p>
+                        </div>
+                        
+                        ${enabled ? `
+                            <div class="bg-green-50 border border-green-200 rounded-xl p-5 mb-6">
+                                <div class="flex items-start">
+                                    <i class="fas fa-check-circle text-green-500 mr-4 text-2xl mt-1"></i>
+                                    <div>
+                                        <h5 class="font-bold text-green-800 text-lg">您的账户受到双重保护</h5>
+                                        <p class="text-green-600 mt-1">每次登录系统时，除了密码外，还需要输入动态验证码</p>
+                                        <ul class="text-green-700 text-sm mt-3 space-y-1">
+                                            <li><i class="fas fa-check mr-2"></i>防止密码泄露导致的账户被盗</li>
+                                            <li><i class="fas fa-check mr-2"></i>符合企业安全合规要求</li>
+                                            <li><i class="fas fa-check mr-2"></i>30秒动态验证码，更安全</li>
+                                        </ul>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                        <button onclick="disable2FA()" class="btn btn-danger w-full"><i class="fas fa-times mr-2"></i>禁用2FA</button>
-                    ` : `
-                        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
-                            <div class="flex items-center">
-                                <i class="fas fa-exclamation-triangle text-yellow-500 mr-3 text-xl"></i>
-                                <div>
-                                    <h5 class="font-medium text-yellow-800">建议启用2FA</h5>
-                                    <p class="text-yellow-600 text-sm">增强账户安全性</p>
+                            <div class="flex gap-4">
+                                <button onclick="loadPage('system-2fa')" class="btn btn-secondary flex-1"><i class="fas fa-sync-alt mr-2"></i>刷新状态</button>
+                                <button onclick="disable2FA()" class="btn btn-danger flex-1"><i class="fas fa-times mr-2"></i>禁用2FA</button>
+                            </div>
+                        ` : `
+                            <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-5 mb-6">
+                                <div class="flex items-start">
+                                    <i class="fas fa-exclamation-triangle text-yellow-500 mr-4 text-2xl mt-1"></i>
+                                    <div>
+                                        <h5 class="font-bold text-yellow-800 text-lg">强烈建议启用2FA</h5>
+                                        <p class="text-yellow-700 mt-1">开启双因素认证，大幅提升账户安全性</p>
+                                        <ul class="text-yellow-700 text-sm mt-3 space-y-1">
+                                            <li><i class="fas fa-info-circle mr-2"></i>需要安装 Google Authenticator 或类似应用</li>
+                                            <li><i class="fas fa-info-circle mr-2"></i>扫描二维码即可完成绑定</li>
+                                            <li><i class="fas fa-info-circle mr-2"></i>绑定后每次登录需输入6位动态码</li>
+                                        </ul>
+                                    </div>
                                 </div>
                             </div>
+                            <button onclick="show2FASetup()" class="btn btn-primary w-full py-3 text-lg"><i class="fas fa-shield-alt mr-2"></i>立即设置2FA</button>
+                        `}
+                    </div>
+                </div>
+                
+                <!-- 2FA使用说明 -->
+                <div class="card mt-6">
+                    <div class="card-header">
+                        <h3 class="text-lg font-semibold"><i class="fas fa-question-circle mr-2 text-blue-500"></i>什么是双因素认证？</h3>
+                    </div>
+                    <div class="p-6">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div class="text-center p-4 bg-blue-50 rounded-lg">
+                                <div class="w-16 h-16 bg-blue-100 rounded-full mx-auto mb-3 flex items-center justify-center">
+                                    <i class="fas fa-mobile-alt text-blue-500 text-2xl"></i>
+                                </div>
+                                <h4 class="font-bold text-blue-800">第一步</h4>
+                                <p class="text-blue-600 text-sm mt-2">下载 Google Authenticator<br>或其他2FA验证器应用</p>
+                            </div>
+                            <div class="text-center p-4 bg-green-50 rounded-lg">
+                                <div class="w-16 h-16 bg-green-100 rounded-full mx-auto mb-3 flex items-center justify-center">
+                                    <i class="fas fa-qrcode text-green-500 text-2xl"></i>
+                                </div>
+                                <h4 class="font-bold text-green-800">第二步</h4>
+                                <p class="text-green-600 text-sm mt-2">使用应用扫描<br>系统生成的二维码</p>
+                            </div>
+                            <div class="text-center p-4 bg-purple-50 rounded-lg">
+                                <div class="w-16 h-16 bg-purple-100 rounded-full mx-auto mb-3 flex items-center justify-center">
+                                    <i class="fas fa-key text-purple-500 text-2xl"></i>
+                                </div>
+                                <h4 class="font-bold text-purple-800">第三步</h4>
+                                <p class="text-purple-600 text-sm mt-2">输入6位动态验证码<br>完成绑定</p>
+                            </div>
                         </div>
-                        <button onclick="show2FASetup()" class="btn btn-primary w-full"><i class="fas fa-shield-alt mr-2"></i>设置2FA</button>
-                    `}
+                    </div>
                 </div>
             </div>
         `;
@@ -3408,20 +3455,20 @@ async function verify2FA(secret) {
     const code = document.getElementById('verifyCode').value.trim();
     if (!/^\d{6}$/.test(code)) { alert('请输入6位数字验证码'); return; }
     try {
-        const res = await apiRequest('/admin/2fa/enable', { method: 'POST', body: JSON.stringify({ secret, code }) });
-        if (res.success) { closeModal(); alert('2FA 绑定成功！下次登录将需要验证码。'); loadPage('admin-profile'); }
+        const res = await apiRequest('/admin/2fa/enable', { method: 'POST', body: JSON.stringify({ code }) });
+        if (res.success) { closeModal(); alert('🎉 2FA 绑定成功！\n下次登录将需要输入动态验证码。'); loadPage('system-2fa'); }
         else { alert(res.message || '验证失败，请检查验证码'); }
     } catch (error) { alert('验证失败: ' + error.message); }
 }
 
 async function disable2FA() {
-    if (!confirm('确定要关闭双重认证吗？这将降低账户安全性。')) return;
-    const password = prompt('请输入登录密码确认：');
+    if (!confirm('⚠️ 确定要关闭双重认证吗？\n这将降低您账户的安全性。')) return;
+    const password = prompt('请输入您的登录密码以确认操作：');
     if (!password) { alert('请输入密码'); return; }
     try {
         const res = await apiRequest('/admin/2fa/disable', { method: 'POST', body: JSON.stringify({ password }) });
-        if (res.success) { alert('2FA 已关闭'); loadPage('admin-profile'); }
-        else { alert(res.message || '关闭失败'); }
+        if (res.success) { alert('2FA 已关闭'); loadPage('system-2fa'); }
+        else { alert(res.message || '关闭失败，请检查密码是否正确'); }
     } catch (error) { alert('操作失败: ' + error.message); }
 }
 
