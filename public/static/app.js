@@ -70,7 +70,8 @@ const menuConfig = [
         children: [
             { id: 'finance-transactions', title: '账户明细', page: 'finance-transactions' },
             { id: 'finance-deposits', title: '存款申请', page: 'finance-deposits' },
-            { id: 'finance-withdrawals', title: '取款申请', page: 'finance-withdrawals' }
+            { id: 'finance-withdrawals', title: '取款申请', page: 'finance-withdrawals' },
+            { id: 'finance-turnover', title: '流水稽核', page: 'finance-turnover' }
         ]
     },
     { 
@@ -92,8 +93,12 @@ const menuConfig = [
     { 
         id: 'risk', 
         icon: 'fa-shield-alt', 
-        title: '风控管理', 
-        page: 'risk-alerts' 
+        title: '风控管理',
+        children: [
+            { id: 'risk-alerts', title: '风控预警', page: 'risk-alerts' },
+            { id: 'risk-rules', title: '风控规则', page: 'risk-rules' },
+            { id: 'risk-limit-groups', title: '限红组', page: 'risk-limit-groups' }
+        ]
     },
     { 
         id: 'reports', 
@@ -101,7 +106,9 @@ const menuConfig = [
         title: '报表中心',
         children: [
             { id: 'reports-settlement', title: '结算报表', page: 'reports-settlement' },
-            { id: 'reports-ranking', title: '盈亏排行', page: 'reports-ranking' }
+            { id: 'reports-ranking', title: '盈亏排行', page: 'reports-ranking' },
+            { id: 'reports-game', title: '游戏报表', page: 'reports-game' },
+            { id: 'reports-daily', title: '盈亏日报', page: 'reports-daily' }
         ]
     },
     { 
@@ -281,12 +288,17 @@ function loadPage(page) {
         'finance-transactions': { title: '账户明细', handler: renderTransactions },
         'finance-deposits': { title: '存款申请', handler: renderDeposits },
         'finance-withdrawals': { title: '取款申请', handler: renderWithdrawals },
+        'finance-turnover': { title: '流水稽核', handler: renderTurnoverRules },
         'bets': { title: '注单列表', handler: renderBets },
         'commission-schemes': { title: '洗码方案', handler: renderCommissionSchemes },
         'commission-records': { title: '洗码记录', handler: renderCommissionRecords },
         'risk-alerts': { title: '风控预警', handler: renderRiskAlerts },
+        'risk-rules': { title: '风控规则', handler: renderRiskRules },
+        'risk-limit-groups': { title: '限红组', handler: renderLimitGroups },
         'reports-settlement': { title: '结算报表', handler: renderSettlementReport },
         'reports-ranking': { title: '盈亏排行', handler: renderRanking },
+        'reports-game': { title: '游戏报表', handler: renderGameReport },
+        'reports-daily': { title: '盈亏日报', handler: renderDailyReport },
         'announcements': { title: '公告管理', handler: renderAnnouncements },
         'system-admins': { title: '账号管理', handler: renderAdmins },
         'system-logs': { title: '操作日志', handler: renderAuditLogs },
@@ -1032,6 +1044,134 @@ async function renderWithdrawals() {
     }
 }
 
+// ==================== 流水稽核 ====================
+async function renderTurnoverRules() {
+    const content = document.getElementById('pageContent');
+    
+    try {
+        const res = await apiRequest('/finance/turnover-rules');
+        const rules = res.data || [];
+        
+        content.innerHTML = `
+            <div class="space-y-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="text-lg font-semibold">
+                            <i class="fas fa-calculator mr-2 text-blue-500"></i>流水稽核规则配置
+                        </h3>
+                        <span class="badge badge-info">V2.1</span>
+                    </div>
+                    <div class="p-4">
+                        <div class="alert alert-info mb-4">
+                            <i class="fas fa-info-circle mr-2"></i>
+                            流水倍数用于计算玩家提款前需要完成的投注量。例如：存款流水倍数为3，则玩家存款1000元需完成3000元投注才能提款。
+                        </div>
+                        <div class="table-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>规则类型</th>
+                                        <th>规则名称</th>
+                                        <th>流水倍数</th>
+                                        <th>状态</th>
+                                        <th>说明</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${rules.length ? rules.map(rule => `
+                                        <tr>
+                                            <td><span class="badge ${rule.rule_type === 'deposit' ? 'badge-success' : rule.rule_type === 'bonus' ? 'badge-warning' : 'badge-info'}">${escapeHtml(rule.rule_type)}</span></td>
+                                            <td class="font-medium">${escapeHtml(rule.rule_name)}</td>
+                                            <td>
+                                                <span class="text-xl font-bold text-blue-600">${rule.multiplier}x</span>
+                                            </td>
+                                            <td>${getStatusBadge(rule.status)}</td>
+                                            <td class="text-gray-600">${escapeHtml(rule.description) || '-'}</td>
+                                            <td>
+                                                <button onclick="editTurnoverRule(${rule.rule_id})" class="text-blue-500 hover:text-blue-700">
+                                                    <i class="fas fa-edit"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    `).join('') : '<tr><td colspan="6" class="text-center text-gray-500 py-10">暂无流水规则</td></tr>'}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="text-lg font-semibold">
+                            <i class="fas fa-search mr-2 text-green-500"></i>玩家流水查询
+                        </h3>
+                    </div>
+                    <div class="p-4">
+                        <div class="flex items-center space-x-4">
+                            <input type="text" id="turnoverUserId" placeholder="输入玩家ID" class="form-input w-48">
+                            <button onclick="checkUserTurnover()" class="btn btn-primary">
+                                <i class="fas fa-search mr-1"></i>查询流水
+                            </button>
+                        </div>
+                        <div id="turnoverResult" class="mt-4"></div>
+                    </div>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+    }
+}
+
+// 查询用户流水
+async function checkUserTurnover() {
+    const userId = document.getElementById('turnoverUserId').value;
+    if (!userId) {
+        alert('请输入玩家ID');
+        return;
+    }
+    
+    const resultDiv = document.getElementById('turnoverResult');
+    resultDiv.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    
+    try {
+        const res = await apiRequest(\`/finance/turnover-audit/\${userId}\`);
+        const { summary } = res.data;
+        
+        resultDiv.innerHTML = \`
+            <div class="bg-gray-50 rounded-lg p-4">
+                <h4 class="font-semibold mb-3">流水稽核结果</h4>
+                <div class="grid grid-cols-4 gap-4">
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-blue-600">¥\${formatNumber(summary.required_turnover)}</div>
+                        <div class="text-gray-500 text-sm">需完成流水</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-green-600">¥\${formatNumber(summary.current_turnover)}</div>
+                        <div class="text-gray-500 text-sm">已完成流水</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-2xl font-bold \${summary.progress >= 100 ? 'text-green-600' : 'text-orange-600'}">\${summary.progress}%</div>
+                        <div class="text-gray-500 text-sm">完成进度</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-2xl">\${summary.can_withdraw ? '<span class="text-green-600"><i class="fas fa-check-circle"></i> 可提款</span>' : '<span class="text-red-600"><i class="fas fa-times-circle"></i> 不可提款</span>'}</div>
+                        <div class="text-gray-500 text-sm">提款状态</div>
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <div class="bg-gray-200 rounded-full h-4 overflow-hidden">
+                        <div class="bg-gradient-to-r from-blue-500 to-green-500 h-full transition-all" style="width: \${Math.min(100, summary.progress)}%"></div>
+                    </div>
+                </div>
+            </div>
+        \`;
+    } catch (error) {
+        resultDiv.innerHTML = \`<div class="text-red-500">查询失败: \${error.message}</div>\`;
+    }
+}
+
 // ==================== 注单管理 ====================
 async function renderBets() {
     const content = document.getElementById('pageContent');
@@ -1314,6 +1454,125 @@ async function renderRiskAlerts() {
     }
 }
 
+// 风控规则管理
+async function renderRiskRules() {
+    const content = document.getElementById('pageContent');
+    
+    try {
+        const res = await apiRequest('/risk/rules');
+        const rules = res.data || [];
+        
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header flex items-center justify-between">
+                    <span><i class="fas fa-cogs mr-2"></i>风控规则配置</span>
+                    <button onclick="showCreateRuleModal()" class="btn btn-primary text-sm">
+                        <i class="fas fa-plus mr-1"></i>创建规则
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="overflow-x-auto">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>规则ID</th>
+                                    <th>规则名称</th>
+                                    <th>规则类型</th>
+                                    <th>触发条件</th>
+                                    <th>动作</th>
+                                    <th>状态</th>
+                                    <th>触发次数</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${rules.length ? rules.map(rule => \`
+                                    <tr>
+                                        <td>\${rule.rule_id}</td>
+                                        <td class="font-medium">\${escapeHtml(rule.rule_name)}</td>
+                                        <td><span class="badge badge-info">\${escapeHtml(rule.rule_type)}</span></td>
+                                        <td class="text-sm text-gray-600">\${escapeHtml(rule.rule_condition || '-')}</td>
+                                        <td><span class="badge badge-warning">\${escapeHtml(rule.rule_action)}</span></td>
+                                        <td>\${getStatusBadge(rule.status)}</td>
+                                        <td>\${rule.alert_count || 0}</td>
+                                        <td>
+                                            <button class="text-blue-500 hover:text-blue-700 mr-2"><i class="fas fa-edit"></i></button>
+                                            <button class="text-red-500 hover:text-red-700"><i class="fas fa-trash"></i></button>
+                                        </td>
+                                    </tr>
+                                \`).join('') : '<tr><td colspan="8" class="text-center text-gray-500 py-10">暂无风控规则</td></tr>'}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        content.innerHTML = \`<div class="text-center text-red-500 py-10">加载失败: \${error.message}</div>\`;
+    }
+}
+
+// 限红组管理
+async function renderLimitGroups() {
+    const content = document.getElementById('pageContent');
+    
+    try {
+        const res = await apiRequest('/risk/limit-groups');
+        const groups = res.data || [];
+        
+        content.innerHTML = \`
+            <div class="card">
+                <div class="card-header flex items-center justify-between">
+                    <span><i class="fas fa-sliders-h mr-2"></i>限红组配置</span>
+                    <button class="btn btn-primary text-sm">
+                        <i class="fas fa-plus mr-1"></i>创建限红组
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        \${groups.map(group => \`
+                            <div class="bg-gray-50 rounded-lg p-4">
+                                <div class="flex items-center justify-between mb-3">
+                                    <h4 class="font-semibold">\${escapeHtml(group.group_name)}</h4>
+                                    <span class="badge badge-info">\${group.user_count || 0}人</span>
+                                </div>
+                                <p class="text-gray-500 text-sm mb-3">\${escapeHtml(group.description) || '无描述'}</p>
+                                <div class="space-y-2 text-sm">
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-600">百家乐</span>
+                                        <span>¥\${formatNumber(group.baccarat_min)} - ¥\${formatNumber(group.baccarat_max)}</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-600">龙虎</span>
+                                        <span>¥\${formatNumber(group.dragon_tiger_min)} - ¥\${formatNumber(group.dragon_tiger_max)}</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-600">轮盘</span>
+                                        <span>¥\${formatNumber(group.roulette_min)} - ¥\${formatNumber(group.roulette_max)}</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-600">骰宝</span>
+                                        <span>¥\${formatNumber(group.sicbo_min)} - ¥\${formatNumber(group.sicbo_max)}</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="text-gray-600">牛牛</span>
+                                        <span>¥\${formatNumber(group.niuniu_min)} - ¥\${formatNumber(group.niuniu_max)}</span>
+                                    </div>
+                                </div>
+                                <div class="mt-4 flex space-x-2">
+                                    <button class="btn btn-outline text-xs flex-1">编辑</button>
+                                </div>
+                            </div>
+                        \`).join('')}
+                    </div>
+                </div>
+            </div>
+        \`;
+    } catch (error) {
+        content.innerHTML = \`<div class="text-center text-red-500 py-10">加载失败: \${error.message}</div>\`;
+    }
+}
+
 // ==================== 报表中心 ====================
 async function renderSettlementReport() {
     const content = document.getElementById('pageContent');
@@ -1444,6 +1703,143 @@ async function renderRanking() {
         `;
     } catch (error) {
         content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+    }
+}
+
+// 游戏报表
+async function renderGameReport() {
+    const content = document.getElementById('pageContent');
+    
+    try {
+        const res = await apiRequest('/reports/game');
+        const list = res.data || [];
+        
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header flex items-center justify-between">
+                    <span><i class="fas fa-gamepad mr-2"></i>游戏报表</span>
+                    <div class="flex space-x-2">
+                        <select class="px-3 py-2 border rounded-lg text-sm">
+                            <option value="">全部游戏</option>
+                            <option value="baccarat">百家乐</option>
+                            <option value="dragon_tiger">龙虎</option>
+                            <option value="roulette">轮盘</option>
+                            <option value="sicbo">骰宝</option>
+                            <option value="niuniu">牛牛</option>
+                        </select>
+                        <input type="date" class="px-3 py-2 border rounded-lg text-sm">
+                        <input type="date" class="px-3 py-2 border rounded-lg text-sm">
+                        <button class="btn btn-primary text-sm">查询</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    ${list.length ? \`
+                        <div class="overflow-x-auto">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>游戏类型</th>
+                                        <th>注单数</th>
+                                        <th>玩家数</th>
+                                        <th>总投注</th>
+                                        <th>有效投注</th>
+                                        <th>玩家盈亏</th>
+                                        <th>公司盈亏</th>
+                                        <th>杀数(%)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    \${list.map(r => \`
+                                        <tr>
+                                            <td><span class="badge badge-info">\${escapeHtml(r.game_type)}</span></td>
+                                            <td>\${r.bet_count || 0}</td>
+                                            <td>\${r.player_count || 0}</td>
+                                            <td>¥ \${formatNumber(r.total_bet)}</td>
+                                            <td>¥ \${formatNumber(r.valid_bet)}</td>
+                                            <td class="\${r.player_win_loss >= 0 ? 'text-green-600' : 'text-red-600'}">
+                                                \${r.player_win_loss >= 0 ? '+' : ''}\${formatNumber(r.player_win_loss)}
+                                            </td>
+                                            <td class="\${r.company_profit >= 0 ? 'text-green-600' : 'text-red-600'} font-bold">
+                                                \${r.company_profit >= 0 ? '+' : ''}\${formatNumber(r.company_profit)}
+                                            </td>
+                                            <td>\${r.valid_bet > 0 ? ((r.company_profit / r.valid_bet) * 100).toFixed(2) : 0}%</td>
+                                        </tr>
+                                    \`).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    \` : '<div class="text-center text-gray-500 py-10">暂无游戏报表数据</div>'}
+                </div>
+            </div>
+        \`;
+    } catch (error) {
+        content.innerHTML = \`<div class="text-center text-red-500 py-10">加载失败: \${error.message}</div>\`;
+    }
+}
+
+// 盈亏日报
+async function renderDailyReport() {
+    const content = document.getElementById('pageContent');
+    
+    try {
+        const res = await apiRequest('/reports/daily');
+        const list = res.data || [];
+        
+        content.innerHTML = \`
+            <div class="card">
+                <div class="card-header flex items-center justify-between">
+                    <span><i class="fas fa-calendar-alt mr-2"></i>盈亏日报</span>
+                    <div class="flex space-x-2">
+                        <input type="date" class="px-3 py-2 border rounded-lg text-sm">
+                        <input type="date" class="px-3 py-2 border rounded-lg text-sm">
+                        <button class="btn btn-primary text-sm">查询</button>
+                        <button class="btn btn-success text-sm"><i class="fas fa-file-excel mr-1"></i>导出</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    \${list.length ? \`
+                        <div class="overflow-x-auto">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>日期</th>
+                                        <th>新增玩家</th>
+                                        <th>活跃玩家</th>
+                                        <th>存款笔数/金额</th>
+                                        <th>提款笔数/金额</th>
+                                        <th>投注笔数/金额</th>
+                                        <th>玩家盈亏</th>
+                                        <th>公司盈亏</th>
+                                        <th>风控预警</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    \${list.map(r => \`
+                                        <tr>
+                                            <td>\${r.report_date}</td>
+                                            <td>\${r.new_players || 0}</td>
+                                            <td>\${r.active_players || 0}</td>
+                                            <td>\${r.deposit_count || 0} / ¥\${formatNumber(r.deposit_amount)}</td>
+                                            <td>\${r.withdraw_count || 0} / ¥\${formatNumber(r.withdraw_amount)}</td>
+                                            <td>\${r.bet_count || 0} / ¥\${formatNumber(r.bet_amount)}</td>
+                                            <td class="\${r.player_win_loss >= 0 ? 'text-green-600' : 'text-red-600'}">
+                                                \${r.player_win_loss >= 0 ? '+' : ''}\${formatNumber(r.player_win_loss)}
+                                            </td>
+                                            <td class="\${r.company_profit >= 0 ? 'text-green-600' : 'text-red-600'} font-bold">
+                                                \${r.company_profit >= 0 ? '+' : ''}\${formatNumber(r.company_profit)}
+                                            </td>
+                                            <td>\${r.risk_alerts || 0}</td>
+                                        </tr>
+                                    \`).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    \` : '<div class="text-center text-gray-500 py-10">暂无日报数据</div>'}
+                </div>
+            </div>
+        \`;
+    } catch (error) {
+        content.innerHTML = \`<div class="text-center text-red-500 py-10">加载失败: \${error.message}</div>\`;
     }
 }
 

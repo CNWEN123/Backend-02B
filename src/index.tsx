@@ -1394,6 +1394,99 @@ app.get('/api/v1/finance/deposit-supplements', async (c) => {
   }
 })
 
+// 流水稽核规则列表
+app.get('/api/v1/finance/turnover-rules', async (c) => {
+  try {
+    const result = await c.env.DB.prepare(`
+      SELECT rule_id, rule_name, 
+             trigger_type as rule_type,
+             multiplier,
+             games_included,
+             valid_days,
+             status,
+             CASE trigger_type 
+               WHEN 1 THEN '存款流水'
+               WHEN 2 THEN '红利流水'
+               WHEN 3 THEN '洗码流水'
+               ELSE '其他'
+             END as description,
+             created_at, updated_at
+      FROM turnover_rules 
+      ORDER BY trigger_type
+    `).all()
+
+    return c.json({ success: true, data: result.results || [] })
+  } catch (error) {
+    console.error('Turnover rules error:', error)
+    return c.json({ success: false, message: '获取流水规则失败' }, 500)
+  }
+})
+
+// 更新流水稽核规则
+app.put('/api/v1/finance/turnover-rules/:rule_id', async (c) => {
+  const rule_id = c.req.param('rule_id')
+  const { multiplier, status } = await c.req.json()
+
+  try {
+    await c.env.DB.prepare(`
+      UPDATE turnover_rules SET multiplier = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE rule_id = ?
+    `).bind(multiplier, status, rule_id).run()
+
+    return c.json({ success: true, message: '更新成功' })
+  } catch (error) {
+    return c.json({ success: false, message: '更新失败' }, 500)
+  }
+})
+
+// 玩家流水稽核检查
+app.get('/api/v1/finance/turnover-audit/:user_id', async (c) => {
+  const user_id = c.req.param('user_id')
+
+  try {
+    // 获取玩家的流水稽核记录
+    const audits = await c.env.DB.prepare(`
+      SELECT ta.*, tr.rule_name, tr.multiplier
+      FROM turnover_audits ta
+      LEFT JOIN turnover_rules tr ON ta.rule_id = tr.rule_id
+      WHERE ta.user_id = ?
+      ORDER BY ta.created_at DESC
+      LIMIT 50
+    `).bind(user_id).all()
+
+    // 获取玩家总投注和总流水要求
+    const user = await c.env.DB.prepare(`
+      SELECT total_bet, total_deposit FROM users WHERE user_id = ?
+    `).bind(user_id).first()
+
+    // 计算流水进度
+    const rules = await c.env.DB.prepare(`
+      SELECT * FROM turnover_rules WHERE status = 1
+    `).all()
+
+    // trigger_type: 1=存款流水, 2=红利流水, 3=洗码流水
+    const depositMultiplier = (rules.results || []).find((r: any) => r.trigger_type === 1)?.multiplier || 1
+    const requiredTurnover = (user?.total_deposit || 0) * depositMultiplier
+    const currentTurnover = user?.total_bet || 0
+    const progress = requiredTurnover > 0 ? Math.min(100, (currentTurnover / requiredTurnover) * 100) : 100
+
+    return c.json({ 
+      success: true, 
+      data: {
+        audits: audits.results || [],
+        summary: {
+          required_turnover: requiredTurnover,
+          current_turnover: currentTurnover,
+          progress: progress.toFixed(2),
+          can_withdraw: currentTurnover >= requiredTurnover
+        }
+      }
+    })
+  } catch (error) {
+    return c.json({ success: false, message: '获取流水稽核失败' }, 500)
+  }
+})
+
 // ==================== 注单管理API ====================
 
 app.get('/api/v1/bets', async (c) => {
