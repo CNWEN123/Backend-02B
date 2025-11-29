@@ -730,6 +730,7 @@ async function renderPlayersOnline() {
                                     <th>当前桌台</th>
                                     <th>游戏类型</th>
                                     <th>VIP等级</th>
+                                    <th>操作</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -742,6 +743,12 @@ async function renderPlayersOnline() {
                                         <td><span class="badge badge-info">${escapeHtml(player.current_table)}</span></td>
                                         <td>${escapeHtml(player.game_type)}</td>
                                         <td><span class="badge badge-warning">VIP${player.vip_level}</span></td>
+                                        <td>
+                                            <button onclick="kickPlayer(${player.user_id}, '${escapeAttr(player.username)}')" 
+                                                    class="btn btn-danger text-xs" title="踢下线">
+                                                <i class="fas fa-user-slash mr-1"></i>踢线
+                                            </button>
+                                        </td>
                                     </tr>
                                 `).join('')}
                             </tbody>
@@ -1949,6 +1956,23 @@ async function togglePlayerStatus(userId, currentStatus) {
 function viewPlayer(userId) {
     // TODO: 打开玩家详情弹窗
     alert('查看玩家详情: ' + userId);
+}
+
+// 踢线玩家
+async function kickPlayer(userId, username) {
+    const reason = prompt(`确定要将玩家 ${username} 踢下线吗？\n请输入踢线原因:`);
+    if (reason === null) return; // 用户取消
+    
+    try {
+        await apiRequest(`/players/${userId}/kick`, {
+            method: 'POST',
+            body: JSON.stringify({ reason: reason || '管理员操作' })
+        });
+        alert(`玩家 ${username} 已被踢下线`);
+        loadPage('players-online');
+    } catch (error) {
+        alert('踢线失败: ' + error.message);
+    }
 }
 
 function searchPlayers() {
