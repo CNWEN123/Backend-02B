@@ -2688,6 +2688,30 @@ app.post('/api/v1/payment-methods', async (c) => {
       return c.json({ success: false, message: '无效的收款类型，可选: crypto/bank/ewallet/other' }, 400)
     }
 
+    // 验证字符串长度
+    if (typeof method_name !== 'string' || method_name.length > 50) {
+      return c.json({ success: false, message: '收款方式名称不能超过50个字符' }, 400)
+    }
+    if (currency && (typeof currency !== 'string' || currency.length > 20)) {
+      return c.json({ success: false, message: '币种不能超过20个字符' }, 400)
+    }
+    if (account_number && (typeof account_number !== 'string' || account_number.length > 200)) {
+      return c.json({ success: false, message: '账号/地址不能超过200个字符' }, 400)
+    }
+
+    // 验证数值范围
+    const safeMinAmount = Math.max(0, Math.min(parseFloat(min_amount) || 0, 100000000))
+    const safeMaxAmount = Math.max(0, Math.min(parseFloat(max_amount) || 1000000, 100000000))
+    const safeDailyLimit = Math.max(0, Math.min(parseFloat(daily_limit) || 0, 1000000000))
+    const safeFeeType = [0, 1, 2].includes(parseInt(fee_type)) ? parseInt(fee_type) : 0
+    const safeFeeAmount = Math.max(0, Math.min(parseFloat(fee_amount) || 0, 100))
+    const safeStatus = [0, 1].includes(parseInt(status)) ? parseInt(status) : 1
+    const safeSortOrder = Math.max(0, Math.min(parseInt(sort_order) || 0, 9999))
+
+    if (safeMinAmount > safeMaxAmount) {
+      return c.json({ success: false, message: '最小金额不能大于最大金额' }, 400)
+    }
+
     const admin = c.get('admin'); const adminId = admin?.admin_id
 
     const result = await c.env.DB.prepare(`
@@ -2700,12 +2724,17 @@ app.post('/api/v1/payment-methods', async (c) => {
         applicable_agents, applicable_vip_levels, remark, created_by
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
-      method_name, method_type, currency,
-      account_name || null, account_number || null, bank_name || null, bank_branch || null, qr_code_url || null,
-      min_amount, max_amount, daily_limit,
-      fee_type, fee_amount,
-      status, sort_order,
-      JSON.stringify(applicable_agents || []), JSON.stringify(applicable_vip_levels || []), remark || null, adminId
+      method_name.trim().substring(0, 50), method_type, (currency || 'CNY').substring(0, 20),
+      account_name ? String(account_name).substring(0, 100) : null, 
+      account_number ? String(account_number).substring(0, 200) : null, 
+      bank_name ? String(bank_name).substring(0, 100) : null, 
+      bank_branch ? String(bank_branch).substring(0, 200) : null, 
+      qr_code_url ? String(qr_code_url).substring(0, 500) : null,
+      safeMinAmount, safeMaxAmount, safeDailyLimit,
+      safeFeeType, safeFeeAmount,
+      safeStatus, safeSortOrder,
+      JSON.stringify(applicable_agents || []), JSON.stringify(applicable_vip_levels || []), 
+      remark ? String(remark).substring(0, 500) : null, adminId
     ).run()
 
     // 记录操作日志
