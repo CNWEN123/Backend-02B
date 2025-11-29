@@ -128,6 +128,25 @@ function validateId(id: string | undefined): number | null {
   return num
 }
 
+// 输入净化 - 防止SQL注入的LIKE参数（转义特殊字符）
+function sanitizeLikeParam(input: string | undefined): string {
+  if (!input || typeof input !== 'string') return ''
+  // 转义LIKE语句的特殊字符: %, _, \
+  return input
+    .replace(/\\/g, '\\\\')
+    .replace(/%/g, '\\%')
+    .replace(/_/g, '\\_')
+    .slice(0, 100) // 限制最大长度
+}
+
+// 输入验证 - 字符串参数
+function validateString(input: string | undefined, maxLength: number = 255): string | null {
+  if (!input || typeof input !== 'string') return null
+  const trimmed = input.trim()
+  if (trimmed.length === 0 || trimmed.length > maxLength) return null
+  return trimmed
+}
+
 // 获取客户端IP
 function getClientIP(c: any): string {
   return c.req.header('CF-Connecting-IP') || 
@@ -482,12 +501,18 @@ app.get('/api/v1/players', async (c) => {
     const params: any[] = []
     
     if (username) {
-      where += ' AND u.username LIKE ?'
-      params.push(`%${username}%`)
+      const sanitized = sanitizeLikeParam(username)
+      if (sanitized) {
+        where += " AND u.username LIKE ? ESCAPE '\\'"
+        params.push(`%${sanitized}%`)
+      }
     }
     if (nickname) {
-      where += ' AND u.nickname LIKE ?'
-      params.push(`%${nickname}%`)
+      const sanitized = sanitizeLikeParam(nickname)
+      if (sanitized) {
+        where += " AND u.nickname LIKE ? ESCAPE '\\'"
+        params.push(`%${sanitized}%`)
+      }
     }
     if (status !== undefined && status !== '') {
       where += ' AND u.status = ?'
@@ -502,12 +527,18 @@ app.get('/api/v1/players', async (c) => {
       params.push(parseInt(vip_level))
     }
     if (start_date) {
-      where += ' AND DATE(u.created_at) >= ?'
-      params.push(start_date)
+      const dateStr = validateString(start_date, 10)
+      if (dateStr) {
+        where += ' AND DATE(u.created_at) >= ?'
+        params.push(dateStr)
+      }
     }
     if (end_date) {
-      where += ' AND DATE(u.created_at) <= ?'
-      params.push(end_date)
+      const dateStr = validateString(end_date, 10)
+      if (dateStr) {
+        where += ' AND DATE(u.created_at) <= ?'
+        params.push(dateStr)
+      }
     }
 
     const countResult = await c.env.DB.prepare(
@@ -955,19 +986,39 @@ app.get('/api/v1/agents/:agent_id', async (c) => {
 
 // 创建代理
 app.post('/api/v1/agents', async (c) => {
+  const admin = c.get('admin')
   const { agent_username, password, nickname, parent_agent_id, level, share_ratio, commission_ratio, currency, default_commission_scheme_id, contact_phone, remark } = await c.req.json()
+  const clientIP = getClientIP(c)
+
+  // 输入验证
+  if (!agent_username || typeof agent_username !== 'string' || agent_username.length < 2 || agent_username.length > 50) {
+    return c.json({ success: false, message: '代理账号格式错误' }, 400)
+  }
+  // 强制要求设置密码，不允许空密码
+  if (!password || typeof password !== 'string' || password.length < 6) {
+    return c.json({ success: false, message: '请设置至少6位的密码' }, 400)
+  }
 
   try {
+    // 对密码进行哈希处理
+    const passwordHash = await hashPassword(password)
+    
     const result = await c.env.DB.prepare(`
       INSERT INTO agents (agent_username, password_hash, nickname, parent_agent_id, level, share_ratio, commission_ratio, currency, default_commission_scheme_id, contact_phone, remark)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(agent_username, password || '123456', nickname, parent_agent_id || null, level || 3, share_ratio || 0, commission_ratio || 0, currency || 'CNY', default_commission_scheme_id || null, contact_phone, remark).run()
+    `).bind(agent_username.trim(), passwordHash, nickname || null, parent_agent_id || null, level || 3, share_ratio || 0, commission_ratio || 0, currency || 'CNY', default_commission_scheme_id || null, contact_phone || null, remark || null).run()
+
+    // 记录审计日志
+    await c.env.DB.prepare(
+      'INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, target_id, new_value, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(admin.admin_id, admin.username, 'CREATE_AGENT', 'agents', result.meta.last_row_id, agent_username, clientIP).run()
 
     return c.json({ success: true, data: { agent_id: result.meta.last_row_id } })
   } catch (error: any) {
     if (error.message?.includes('UNIQUE')) {
       return c.json({ success: false, message: '代理账号已存在' }, 400)
     }
+    console.error('Create agent error:', error)
     return c.json({ success: false, message: '创建失败' }, 500)
   }
 })
@@ -1055,16 +1106,25 @@ app.get('/api/v1/finance/transactions', async (c) => {
       params.push(parseInt(user_id))
     }
     if (username) {
-      where += ' AND u.username LIKE ?'
-      params.push(`%${username}%`)
+      const sanitized = sanitizeLikeParam(username)
+      if (sanitized) {
+        where += " AND u.username LIKE ? ESCAPE '\\'"
+        params.push(`%${sanitized}%`)
+      }
     }
     if (start_date) {
-      where += ' AND DATE(t.created_at) >= ?'
-      params.push(start_date)
+      const dateStr = validateString(start_date, 10)
+      if (dateStr) {
+        where += ' AND DATE(t.created_at) >= ?'
+        params.push(dateStr)
+      }
     }
     if (end_date) {
-      where += ' AND DATE(t.created_at) <= ?'
-      params.push(end_date)
+      const dateStr = validateString(end_date, 10)
+      if (dateStr) {
+        where += ' AND DATE(t.created_at) <= ?'
+        params.push(dateStr)
+      }
     }
 
     const countResult = await c.env.DB.prepare(
@@ -1259,16 +1319,42 @@ app.post('/api/v1/finance/manual-adjustment', async (c) => {
 
 // 存款补单
 app.post('/api/v1/finance/deposit-supplement', async (c) => {
+  const admin = c.get('admin')
   const { user_id, amount, payment_method, payment_reference, reason } = await c.req.json()
+  const clientIP = getClientIP(c)
+
+  // 输入验证
+  const targetUserId = validateId(String(user_id))
+  if (!targetUserId) {
+    return c.json({ success: false, message: '无效的用户ID' }, 400)
+  }
+  if (typeof amount !== 'number' || isNaN(amount) || amount <= 0 || amount > 10000000) {
+    return c.json({ success: false, message: '无效的金额' }, 400)
+  }
+  if (!reason || typeof reason !== 'string' || reason.length < 2) {
+    return c.json({ success: false, message: '请填写补单原因' }, 400)
+  }
 
   try {
+    // 验证用户是否存在
+    const user = await c.env.DB.prepare('SELECT user_id, username FROM users WHERE user_id = ?').bind(targetUserId).first()
+    if (!user) {
+      return c.json({ success: false, message: '用户不存在' }, 404)
+    }
+
     const result = await c.env.DB.prepare(`
       INSERT INTO deposit_supplements (user_id, amount, payment_method, payment_reference, supplement_reason, created_by)
-      VALUES (?, ?, ?, ?, ?, 1)
-    `).bind(user_id, amount, payment_method || '', payment_reference || '', reason).run()
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).bind(targetUserId, amount, payment_method || '', payment_reference || '', reason, admin.admin_id).run()
+
+    // 记录审计日志
+    await c.env.DB.prepare(
+      'INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, target_id, new_value, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(admin.admin_id, admin.username, 'DEPOSIT_SUPPLEMENT', 'deposit_supplements', result.meta.last_row_id, JSON.stringify({user_id: targetUserId, amount, reason}), clientIP).run()
 
     return c.json({ success: true, data: { supplement_id: result.meta.last_row_id } })
   } catch (error) {
+    console.error('Deposit supplement error:', error)
     return c.json({ success: false, message: '提交补单失败' }, 500)
   }
 })
@@ -1330,20 +1416,32 @@ app.get('/api/v1/bets', async (c) => {
       params.push(parseInt(user_id))
     }
     if (username) {
-      where += ' AND u.username LIKE ?'
-      params.push(`%${username}%`)
+      const sanitized = sanitizeLikeParam(username)
+      if (sanitized) {
+        where += " AND u.username LIKE ? ESCAPE '\\'"
+        params.push(`%${sanitized}%`)
+      }
     }
     if (bet_no) {
-      where += ' AND b.bet_no LIKE ?'
-      params.push(`%${bet_no}%`)
+      const sanitized = sanitizeLikeParam(bet_no)
+      if (sanitized) {
+        where += " AND b.bet_no LIKE ? ESCAPE '\\'"
+        params.push(`%${sanitized}%`)
+      }
     }
     if (start_date) {
-      where += ' AND DATE(b.created_at) >= ?'
-      params.push(start_date)
+      const dateStr = validateString(start_date, 10)
+      if (dateStr) {
+        where += ' AND DATE(b.created_at) >= ?'
+        params.push(dateStr)
+      }
     }
     if (end_date) {
-      where += ' AND DATE(b.created_at) <= ?'
-      params.push(end_date)
+      const dateStr = validateString(end_date, 10)
+      if (dateStr) {
+        where += ' AND DATE(b.created_at) <= ?'
+        params.push(dateStr)
+      }
     }
 
     const countResult = await c.env.DB.prepare(
@@ -1423,7 +1521,7 @@ app.post('/api/v1/bets/:bet_id/void', async (c) => {
 
   try {
     // 验证二次密码 - 从数据库获取管理员的二次密码进行验证
-    if (!secondary_password || typeof secondary_password !== 'string') {
+    if (!secondary_password || typeof secondary_password !== 'string' || secondary_password.length < 4) {
       return c.json({ success: false, message: '请输入二次密码' }, 400)
     }
     
@@ -1431,9 +1529,13 @@ app.post('/api/v1/bets/:bet_id/void', async (c) => {
       'SELECT secondary_password FROM admin_users WHERE admin_id = ?'
     ).bind(admin.admin_id).first()
     
-    // 如果管理员设置了二次密码，验证它；否则使用默认逻辑
+    // 必须从数据库获取二次密码，不允许使用默认值
+    if (!adminUser?.secondary_password) {
+      return c.json({ success: false, message: '请先在个人设置中配置二次密码' }, 400)
+    }
+    
     const secondaryHash = await hashPassword(secondary_password)
-    const storedSecondary = adminUser?.secondary_password as string || await hashPassword('123456')
+    const storedSecondary = adminUser.secondary_password as string
     if (!secureCompare(secondaryHash, storedSecondary) && !secureCompare(secondary_password, storedSecondary)) {
       await c.env.DB.prepare(
         'INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, target_id, new_value, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)'
@@ -1515,8 +1617,7 @@ app.get('/api/v1/bets/special', async (c) => {
 
 // 开奖结果
 app.get('/api/v1/game-results', async (c) => {
-  const page = parseInt(c.req.query('page') || '1')
-  const size = parseInt(c.req.query('size') || '20')
+  const { page, size } = validatePagination(c.req.query('page'), c.req.query('size'))
   const game_type = c.req.query('game_type')
   const offset = (page - 1) * size
 

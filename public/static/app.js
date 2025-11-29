@@ -6,6 +6,36 @@ let currentPage = 'dashboard';
 let dashboardCharts = {};
 const API_BASE = '/api/v1';
 
+// ==================== 安全工具函数 ====================
+
+// XSS防护 - HTML转义
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    const div = document.createElement('div');
+    div.textContent = String(str);
+    return div.innerHTML;
+}
+
+// 安全的HTML属性转义
+function escapeAttr(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+// 安全的JSON渲染（用于调试等）
+function safeJsonDisplay(obj) {
+    try {
+        return escapeHtml(JSON.stringify(obj, null, 2));
+    } catch {
+        return '[Object]';
+    }
+}
+
 // ==================== 菜单配置 ====================
 const menuConfig = [
     { 
@@ -603,20 +633,20 @@ async function renderPlayers() {
                             <tbody>
                                 ${list.map(player => `
                                     <tr>
-                                        <td>${player.user_id}</td>
-                                        <td class="font-medium">${player.username}</td>
-                                        <td>${player.nickname || '-'}</td>
+                                        <td>${escapeHtml(player.user_id)}</td>
+                                        <td class="font-medium">${escapeHtml(player.username)}</td>
+                                        <td>${escapeHtml(player.nickname) || '-'}</td>
                                         <td class="text-green-600 font-medium">¥ ${formatNumber(player.balance)}</td>
-                                        <td>${player.agent_username || '-'}</td>
-                                        <td><span class="badge badge-info">VIP${player.vip_level}</span></td>
+                                        <td>${escapeHtml(player.agent_username) || '-'}</td>
+                                        <td><span class="badge badge-info">VIP${escapeHtml(player.vip_level)}</span></td>
                                         <td>${getStatusBadge(player.status)}</td>
                                         <td>${formatDate(player.created_at)}</td>
                                         <td>
                                             <div class="flex space-x-2">
-                                                <button onclick="viewPlayer(${player.user_id})" class="text-blue-500 hover:text-blue-700" title="详情">
+                                                <button onclick="viewPlayer(${parseInt(player.user_id) || 0})" class="text-blue-500 hover:text-blue-700" title="详情">
                                                     <i class="fas fa-eye"></i>
                                                 </button>
-                                                <button onclick="togglePlayerStatus(${player.user_id}, ${player.status})" 
+                                                <button onclick="togglePlayerStatus(${parseInt(player.user_id) || 0}, ${parseInt(player.status) || 0})" 
                                                         class="${player.status === 1 ? 'text-orange-500 hover:text-orange-700' : 'text-green-500 hover:text-green-700'}" 
                                                         title="${player.status === 1 ? '冻结' : '解冻'}">
                                                     <i class="fas fa-${player.status === 1 ? 'lock' : 'unlock'}"></i>
