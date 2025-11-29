@@ -4972,49 +4972,45 @@ async function renderTransferRecords() {
     content.innerHTML = `
         <div class="card">
             <div class="card-header">
-                <div class="flex items-center justify-between mb-3">
+                <!-- 标题栏 -->
+                <div class="flex items-center justify-between mb-4">
                     <h3 class="text-lg font-semibold">
                         <i class="fas fa-exchange-alt mr-2 text-purple-500"></i>转账记录报表
-                        <span class="badge badge-purple ml-2">会员互转</span>
+                        <span class="badge badge-blue ml-2">会员互转</span>
                     </h3>
                     <div class="flex space-x-2">
                         <button onclick="showFeeSettings()" class="btn btn-outline text-sm">
                             <i class="fas fa-cog mr-1"></i>手续费设置
                         </button>
                         <button onclick="exportTransfer()" class="btn btn-success text-sm">
-                            <i class="fas fa-file-excel mr-1"></i>导出Excel
+                            <i class="fas fa-file-excel mr-1"></i>导出
                         </button>
                     </div>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
-                    <div>
-                        <label class="block text-xs text-gray-500 mb-1">开始日期</label>
-                        <input type="date" id="TransferStartDate" class="form-input text-sm w-full" value="${defaultRange.startDate}">
-                    </div>
-                    <div>
-                        <label class="block text-xs text-gray-500 mb-1">结束日期</label>
-                        <input type="date" id="TransferEndDate" class="form-input text-sm w-full" value="${defaultRange.endDate}">
-                    </div>
-                    <div>
-                        <label class="block text-xs text-gray-500 mb-1">转出方</label>
-                        <input type="text" id="TransferFromUser" class="form-input text-sm w-full" placeholder="账号">
-                    </div>
-                    <div>
-                        <label class="block text-xs text-gray-500 mb-1">转入方</label>
-                        <input type="text" id="TransferToUser" class="form-input text-sm w-full" placeholder="账号">
-                    </div>
-                    <div>
-                        <label class="block text-xs text-gray-500 mb-1">类型</label>
-                        <select id="TransferType" class="form-input text-sm w-full">
-                            <option value="">全部</option>
-                            <option value="member">会员互转</option>
-                            <option value="agent">代理下发</option>
-                        </select>
-                    </div>
-                    <div>
-                        <button onclick="queryTransfer()" class="btn btn-primary text-sm w-full">
-                            <i class="fas fa-search mr-1"></i>查询
-                        </button>
+                <!-- 筛选条件 -->
+                <div class="bg-gray-50 rounded-lg p-4">
+                    <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">开始日期</label>
+                            <input type="date" id="TransferStartDate" class="form-input text-sm w-full" value="${defaultRange.startDate}">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">结束日期</label>
+                            <input type="date" id="TransferEndDate" class="form-input text-sm w-full" value="${defaultRange.endDate}">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">转出会员</label>
+                            <input type="text" id="TransferFromUser" class="form-input text-sm w-full" placeholder="输入账号">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">转入会员</label>
+                            <input type="text" id="TransferToUser" class="form-input text-sm w-full" placeholder="输入账号">
+                        </div>
+                        <div class="flex items-end">
+                            <button onclick="queryTransfer()" class="btn btn-primary text-sm w-full h-[38px]">
+                                <i class="fas fa-search mr-1"></i>查询
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -5032,120 +5028,95 @@ async function queryTransfer() {
     const endDate = document.getElementById('TransferEndDate')?.value || getDefaultDateRange().endDate;
     const fromUser = document.getElementById('TransferFromUser')?.value || '';
     const toUser = document.getElementById('TransferToUser')?.value || '';
-    const transferType = document.getElementById('TransferType')?.value || '';
     const container = document.getElementById('transferContent');
     
     try {
-        let url = `/reports/transfers?start_date=${startDate}&end_date=${endDate}`;
+        // 只查询会员互转类型
+        let url = `/reports/transfers?start_date=${startDate}&end_date=${endDate}&transfer_type=member`;
         if (fromUser) url += `&from_username=${encodeURIComponent(fromUser)}`;
         if (toUser) url += `&to_username=${encodeURIComponent(toUser)}`;
-        if (transferType) url += `&transfer_type=${transferType}`;
         
         const res = await apiRequest(url);
         const { list, total, summary } = res.data || { list: [], total: 0, summary: {} };
         currentReportData.transfer = list;
         
-        const transferTypeMap = {
-            'member': { label: '会员互转', color: 'blue' },
-            'agent': { label: '代理下发', color: 'purple' }
-        };
-        
         container.innerHTML = `
-            <!-- 汇总统计 -->
-            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-4">
-                <div class="bg-purple-50 rounded-lg p-3 text-center">
-                    <div class="text-sm text-gray-600">转账笔数</div>
-                    <div class="text-xl font-bold text-purple-600">${formatNumber(summary.total_count || 0)}</div>
+            <!-- 汇总统计卡片 -->
+            <div class="grid grid-cols-3 md:grid-cols-6 gap-3 mb-4">
+                <div class="bg-purple-50 rounded-lg p-3 text-center border border-purple-100">
+                    <div class="text-xs text-gray-500 mb-1">转账笔数</div>
+                    <div class="text-lg font-bold text-purple-600">${formatNumber(summary.total_count || 0)}</div>
                 </div>
-                <div class="bg-blue-50 rounded-lg p-3 text-center">
-                    <div class="text-sm text-gray-600">转账总额</div>
-                    <div class="text-xl font-bold text-blue-600">${formatMoney(summary.total_amount || 0)}</div>
+                <div class="bg-blue-50 rounded-lg p-3 text-center border border-blue-100">
+                    <div class="text-xs text-gray-500 mb-1">转账总额</div>
+                    <div class="text-lg font-bold text-blue-600">${formatMoney(summary.total_amount || 0)}</div>
                 </div>
-                <div class="bg-orange-50 rounded-lg p-3 text-center">
-                    <div class="text-sm text-gray-600">手续费</div>
-                    <div class="text-xl font-bold text-orange-600">${formatMoney(summary.total_fee || 0)}</div>
+                <div class="bg-orange-50 rounded-lg p-3 text-center border border-orange-100">
+                    <div class="text-xs text-gray-500 mb-1">手续费收入</div>
+                    <div class="text-lg font-bold text-orange-600">${formatMoney(summary.total_fee || 0)}</div>
                 </div>
-                <div class="bg-green-50 rounded-lg p-3 text-center">
-                    <div class="text-sm text-gray-600">实际到账</div>
-                    <div class="text-xl font-bold text-green-600">${formatMoney(summary.total_actual || 0)}</div>
+                <div class="bg-green-50 rounded-lg p-3 text-center border border-green-100">
+                    <div class="text-xs text-gray-500 mb-1">实际到账</div>
+                    <div class="text-lg font-bold text-green-600">${formatMoney(summary.total_actual || 0)}</div>
                 </div>
-                <div class="bg-indigo-50 rounded-lg p-3 text-center">
-                    <div class="text-sm text-gray-600">转出人数</div>
-                    <div class="text-xl font-bold text-indigo-600">${formatNumber(summary.unique_senders || 0)}</div>
+                <div class="bg-indigo-50 rounded-lg p-3 text-center border border-indigo-100">
+                    <div class="text-xs text-gray-500 mb-1">转出人数</div>
+                    <div class="text-lg font-bold text-indigo-600">${formatNumber(summary.unique_senders || 0)}</div>
                 </div>
-                <div class="bg-pink-50 rounded-lg p-3 text-center">
-                    <div class="text-sm text-gray-600">转入人数</div>
-                    <div class="text-xl font-bold text-pink-600">${formatNumber(summary.unique_receivers || 0)}</div>
-                </div>
-            </div>
-            
-            <!-- 类型统计 -->
-            <div class="flex space-x-4 mb-4">
-                <div class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm">
-                    <i class="fas fa-users mr-1"></i>会员互转: ${formatNumber(summary.member_count || 0)} 笔
-                </div>
-                <div class="bg-purple-100 text-purple-800 px-3 py-1 rounded-full text-sm">
-                    <i class="fas fa-user-tie mr-1"></i>代理下发: ${formatNumber(summary.agent_count || 0)} 笔
+                <div class="bg-pink-50 rounded-lg p-3 text-center border border-pink-100">
+                    <div class="text-xs text-gray-500 mb-1">转入人数</div>
+                    <div class="text-lg font-bold text-pink-600">${formatNumber(summary.unique_receivers || 0)}</div>
                 </div>
             </div>
             
             <!-- 数据表格 -->
-            <div class="overflow-x-auto">
-                <table class="data-table">
-                    <thead>
+            <div class="border rounded-lg overflow-hidden">
+                <table class="data-table mb-0">
+                    <thead class="bg-gray-50">
                         <tr>
-                            <th>订单号</th>
-                            <th>转出方</th>
-                            <th></th>
-                            <th>转入方</th>
-                            <th>金额</th>
-                            <th>类型</th>
-                            <th>状态</th>
-                            <th>时间</th>
-                            <th>操作</th>
+                            <th class="text-left">订单号</th>
+                            <th class="text-left">转出会员</th>
+                            <th class="text-center" style="width:60px;"></th>
+                            <th class="text-left">转入会员</th>
+                            <th class="text-right">转账金额</th>
+                            <th class="text-right">手续费</th>
+                            <th class="text-right">实际到账</th>
+                            <th class="text-center">状态</th>
+                            <th class="text-center">转账时间</th>
+                            <th class="text-center" style="width:80px;">操作</th>
                         </tr>
                     </thead>
                     <tbody>
                         ${list.length === 0 ? 
-                            '<tr><td colspan="9" class="text-center text-gray-500 py-8"><i class="fas fa-inbox text-3xl mb-2"></i><br>暂无转账记录</td></tr>' : 
+                            '<tr><td colspan="10" class="text-center text-gray-400 py-12"><i class="fas fa-inbox text-4xl mb-3 block"></i>暂无转账记录</td></tr>' : 
                             list.map(t => {
-                                const typeInfo = transferTypeMap[t.transfer_type] || { label: t.transfer_type, color: 'gray' };
                                 const statusMap = { 0: { label: '失败', color: 'red' }, 1: { label: '成功', color: 'green' }, 2: { label: '处理中', color: 'yellow' } };
                                 const statusInfo = statusMap[t.status] || { label: '未知', color: 'gray' };
                                 
                                 return `
-                                    <tr class="hover:bg-gray-50">
-                                        <td>
-                                            <div class="font-mono text-xs text-gray-600">${escapeHtml(t.order_no || '')}</div>
+                                    <tr class="hover:bg-gray-50 border-b">
+                                        <td class="text-left">
+                                            <span class="font-mono text-xs text-gray-500">${escapeHtml(t.order_no || '')}</span>
                                         </td>
-                                        <td>
+                                        <td class="text-left">
                                             <div class="font-medium text-blue-600">${escapeHtml(t.from_username || '')}</div>
-                                            <div class="text-xs text-gray-400">
-                                                <i class="fas fa-map-marker-alt mr-1"></i>${escapeHtml(t.ip_address || '-')}
-                                            </div>
+                                            <div class="text-xs text-gray-400"><i class="fas fa-wifi mr-1"></i>${escapeHtml(t.ip_address || '-')}</div>
                                         </td>
-                                        <td class="text-center px-1">
-                                            <div class="flex flex-col items-center">
-                                                <span class="text-purple-600 font-bold text-sm">${formatMoney(t.amount)}</span>
-                                                <i class="fas fa-arrow-right text-purple-400"></i>
-                                            </div>
+                                        <td class="text-center">
+                                            <i class="fas fa-arrow-right text-purple-400 text-lg"></i>
                                         </td>
-                                        <td>
+                                        <td class="text-left">
                                             <div class="font-medium text-green-600">${escapeHtml(t.to_username || '')}</div>
-                                            <div class="text-xs text-gray-400">
-                                                <i class="fas fa-map-marker-alt mr-1"></i>${escapeHtml(t.to_ip_address || '-')}
-                                            </div>
+                                            <div class="text-xs text-gray-400"><i class="fas fa-wifi mr-1"></i>${escapeHtml(t.to_ip_address || '-')}</div>
                                         </td>
-                                        <td>
-                                            <div class="text-green-600 font-medium">${formatMoney(t.actual_amount)}</div>
-                                            ${parseFloat(t.fee) > 0 ? `<div class="text-xs text-orange-500">费:${formatMoney(t.fee)}</div>` : ''}
-                                        </td>
-                                        <td><span class="badge badge-${typeInfo.color}">${typeInfo.label}</span></td>
-                                        <td><span class="badge badge-${statusInfo.color}">${statusInfo.label}</span></td>
-                                        <td class="text-xs text-gray-500">${formatDate(t.created_at)}</td>
-                                        <td>
-                                            <button onclick="viewTransferDetail(${t.transfer_id})" class="btn btn-outline text-xs py-1 px-2" title="查看详情">
-                                                <i class="fas fa-eye mr-1"></i>详情
+                                        <td class="text-right font-bold text-purple-600">${formatMoney(t.amount)}</td>
+                                        <td class="text-right ${parseFloat(t.fee) > 0 ? 'text-orange-600' : 'text-gray-400'}">${formatMoney(t.fee)}</td>
+                                        <td class="text-right font-medium text-green-600">${formatMoney(t.actual_amount)}</td>
+                                        <td class="text-center"><span class="badge badge-${statusInfo.color}">${statusInfo.label}</span></td>
+                                        <td class="text-center text-xs text-gray-500">${formatDate(t.created_at)}</td>
+                                        <td class="text-center">
+                                            <button onclick="viewTransferDetail(${t.transfer_id})" class="text-blue-500 hover:text-blue-700" title="查看详情">
+                                                <i class="fas fa-search-plus"></i>
                                             </button>
                                         </td>
                                     </tr>
@@ -5156,13 +5127,13 @@ async function queryTransfer() {
                 </table>
             </div>
             
-            <!-- 分页信息 -->
-            <div class="mt-4 text-sm text-gray-500 text-center">
+            <!-- 底部信息 -->
+            <div class="mt-3 text-xs text-gray-400 text-right">
                 共 ${formatNumber(total)} 条记录
             </div>
         `;
     } catch (error) {
-        container.innerHTML = '<div class="text-center text-red-500 py-10">加载失败: ' + escapeHtml(error.message) + '</div>';
+        container.innerHTML = '<div class="text-center text-red-500 py-10"><i class="fas fa-exclamation-circle mr-2"></i>加载失败: ' + escapeHtml(error.message) + '</div>';
     }
 }
 
@@ -5175,7 +5146,6 @@ async function viewTransferDetail(transferId) {
         const toUser = t.to_user_info || {};
         const fundSource = t.fund_source || [];
         
-        const transferTypeMap = { 'member': '会员互转', 'agent': '代理下发' };
         const statusMap = { 0: '失败', 1: '成功', 2: '处理中' };
         const txTypeMap = { 1: '存款', 2: '提款', 3: '投注', 4: '派彩', 5: '红利', 6: '洗码', 7: '调账', 8: '转入', 9: '转出' };
         
@@ -5197,7 +5167,7 @@ async function viewTransferDetail(transferId) {
                     </div>
                     <div class="bg-gray-50 p-3 rounded-lg">
                         <div class="text-xs text-gray-500 mb-1">类型</div>
-                        <div class="text-sm font-medium">${transferTypeMap[t.transfer_type] || t.transfer_type}</div>
+                        <div class="text-sm font-medium">会员互转</div>
                     </div>
                 </div>
                 
@@ -5392,28 +5362,26 @@ function exportTransfer() {
         return;
     }
     
-    const transferTypeMap = { 'member': '会员互转', 'agent': '代理下发' };
     const statusMap = { 0: '失败', 1: '成功', 2: '处理中' };
     
     const exportData = currentReportData.transfer.map(t => ({
         ...t,
-        transfer_type_text: transferTypeMap[t.transfer_type] || t.transfer_type,
         status_text: statusMap[t.status] || '未知'
     }));
     
     exportToExcel(exportData, [
         { key: 'order_no', label: '订单号' },
         { key: 'from_username', label: '转出会员' },
+        { key: 'ip_address', label: '转出IP' },
         { key: 'to_username', label: '转入会员' },
+        { key: 'to_ip_address', label: '转入IP' },
         { key: 'amount', label: '转账金额' },
         { key: 'fee', label: '手续费' },
         { key: 'actual_amount', label: '实际到账' },
-        { key: 'transfer_type_text', label: '类型' },
         { key: 'status_text', label: '状态' },
         { key: 'created_at', label: '时间' },
-        { key: 'ip_address', label: '操作IP' },
         { key: 'remark', label: '备注' }
-    ], '转账记录');
+    ], '会员转账记录');
 }
 
 // ==================== 转账手续费设置 ====================
@@ -5423,7 +5391,7 @@ async function showFeeSettings() {
         const rules = res.data || [];
         
         const feeTypeMap = { 'percent': '百分比', 'fixed': '固定金额' };
-        const transferTypeMap = { 'all': '全部', 'member': '会员互转', 'agent': '代理下发' };
+        const transferTypeMap = { 'all': '全部会员', 'member': '会员互转' };
         
         openModal(`
             <div class="card-header flex items-center justify-between">
@@ -5582,9 +5550,8 @@ function showAddFeeRule(ruleData = null) {
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-1">适用类型</label>
                         <select id="feeTransferType" class="form-input w-full">
-                            <option value="all" ${r.transfer_type === 'all' ? 'selected' : ''}>全部</option>
+                            <option value="all" ${r.transfer_type === 'all' ? 'selected' : ''}>全部会员</option>
                             <option value="member" ${r.transfer_type === 'member' ? 'selected' : ''}>会员互转</option>
-                            <option value="agent" ${r.transfer_type === 'agent' ? 'selected' : ''}>代理下发</option>
                         </select>
                     </div>
                     <div>
