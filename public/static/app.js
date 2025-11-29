@@ -313,7 +313,8 @@ function loadPage(page) {
         'reports-agent': { title: '代理业绩', handler: renderAgentPerformance },
         'announcements': { title: '公告管理', handler: renderAnnouncements },
         'system-admins': { title: '账号管理', handler: renderAdmins },
-        'system-roles': { title: '角色权限', handler: renderRoles },
+        'system-roles': { title: '角色权限', handler: renderRolesEnhanced },
+        'system-2fa': { title: '2FA设置', handler: render2FASettings },
         'system-logs': { title: '操作日志', handler: renderAuditLogs },
         'system-login-logs': { title: '登录日志', handler: renderLoginLogs },
         'studio-dealers': { title: '荷官档案', handler: renderDealers },
@@ -1359,7 +1360,7 @@ async function submitPaymentMethod(methodId = null) {
         account_number: document.getElementById('pmAccountNumber').value.trim(),
         bank_name: document.getElementById('pmBankName')?.value.trim() || '',
         bank_branch: document.getElementById('pmBankBranch')?.value.trim() || '',
-        qr_code_url: document.getElementById('pmQrCode')?.value.trim() || '',
+        qr_url: document.getElementById('pmQrCode')?.value.trim() || '',
         min_amount: parseFloat(document.getElementById('pmMinAmount').value) || 0,
         max_amount: parseFloat(document.getElementById('pmMaxAmount').value) || 1000000,
         fee_type: parseInt(document.getElementById('pmFeeType').value),
@@ -1420,7 +1421,7 @@ async function editPaymentMethod(methodId) {
             document.getElementById('pmAccountNumber').value = pm.account_number || '';
             document.getElementById('pmBankName').value = pm.bank_name || '';
             document.getElementById('pmBankBranch').value = pm.bank_branch || '';
-            document.getElementById('pmQrCode').value = pm.qr_code_url || '';
+            document.getElementById('pmQrCode').value = pm.qr_url || '';
             document.getElementById('pmMinAmount').value = pm.min_amount || 0;
             document.getElementById('pmMaxAmount').value = pm.max_amount || 1000000;
             document.getElementById('pmFeeType').value = pm.fee_type || 0;
@@ -1587,15 +1588,15 @@ async function renderCommissionSchemes() {
         content.innerHTML = `
             <div class="card">
                 <div class="card-header flex items-center justify-between">
-                    <span>洗码方案配置</span>
-                    <button class="btn btn-primary text-sm"><i class="fas fa-plus mr-1"></i>新增方案</button>
+                    <span>洗码方案配置 <span class="badge badge-primary">${list.length}</span></span>
+                    <button onclick="showAddCommissionScheme()" class="btn btn-primary text-sm"><i class="fas fa-plus mr-1"></i>新增方案</button>
                 </div>
                 <div class="card-body">
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         ${list.map(scheme => `
                             <div class="border rounded-lg p-4 hover:shadow-lg transition">
                                 <div class="flex items-center justify-between mb-3">
-                                    <h3 class="font-bold text-lg">${scheme.scheme_name}</h3>
+                                    <h3 class="font-bold text-lg">${escapeHtml(scheme.scheme_name)}</h3>
                                     ${scheme.status === 1 ? '<span class="badge badge-success">启用</span>' : '<span class="badge badge-danger">禁用</span>'}
                                 </div>
                                 <div class="space-y-2 text-sm">
@@ -1633,8 +1634,8 @@ async function renderCommissionSchemes() {
                                     </div>
                                 </div>
                                 <div class="mt-4 flex space-x-2">
-                                    <button class="btn btn-outline text-sm flex-1">编辑</button>
-                                    <button class="btn btn-primary text-sm flex-1">绑定</button>
+                                    <button onclick="editCommissionScheme(${scheme.scheme_id})" class="btn btn-outline text-sm flex-1"><i class="fas fa-edit mr-1"></i>编辑</button>
+                                    <button onclick="deleteCommissionScheme(${scheme.scheme_id}, '${escapeAttr(scheme.scheme_name)}')" class="btn btn-danger text-sm"><i class="fas fa-trash"></i></button>
                                 </div>
                             </div>
                         `).join('')}
@@ -1643,7 +1644,7 @@ async function renderCommissionSchemes() {
             </div>
         `;
     } catch (error) {
-        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -2074,8 +2075,8 @@ async function renderDealers() {
         content.innerHTML = `
             <div class="card">
                 <div class="card-header flex items-center justify-between">
-                    <span>荷官档案库</span>
-                    <button class="btn btn-primary text-sm"><i class="fas fa-plus mr-1"></i>新增荷官</button>
+                    <span>荷官档案库 <span class="badge badge-primary">${list.length}</span></span>
+                    <button onclick="showAddDealer()" class="btn btn-primary text-sm"><i class="fas fa-plus mr-1"></i>新增荷官</button>
                 </div>
                 <div class="card-body">
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -2084,15 +2085,15 @@ async function renderDealers() {
                                 <div class="w-20 h-20 bg-gradient-to-r from-pink-400 to-purple-400 rounded-full mx-auto mb-3 flex items-center justify-center text-white text-2xl">
                                     <i class="fas fa-user"></i>
                                 </div>
-                                <h3 class="font-bold">${dealer.stage_name_cn}</h3>
-                                <p class="text-sm text-gray-500">${dealer.stage_name_en || '-'}</p>
-                                <p class="text-xs text-gray-400 mt-1">工号: ${dealer.staff_id}</p>
+                                <h3 class="font-bold">${escapeHtml(dealer.stage_name_cn)}</h3>
+                                <p class="text-sm text-gray-500">${escapeHtml(dealer.stage_name_en || '-')}</p>
+                                <p class="text-xs text-gray-400 mt-1">工号: ${escapeHtml(dealer.staff_id)}</p>
                                 <div class="mt-2">
                                     ${dealer.status === 1 ? '<span class="badge badge-success">在职</span>' : dealer.status === 2 ? '<span class="badge badge-warning">休假</span>' : '<span class="badge badge-danger">离职</span>'}
                                 </div>
                                 <div class="mt-3 flex justify-center space-x-2">
-                                    <button class="btn btn-outline text-xs">编辑</button>
-                                    <button class="btn btn-primary text-xs">排班</button>
+                                    <button onclick="editDealer(${dealer.dealer_id})" class="btn btn-outline text-xs"><i class="fas fa-edit"></i> 编辑</button>
+                                    <button onclick="deleteDealer(${dealer.dealer_id}, '${escapeAttr(dealer.stage_name_cn)}')" class="btn btn-danger text-xs"><i class="fas fa-trash"></i></button>
                                 </div>
                             </div>
                         `).join('')}
@@ -2101,7 +2102,7 @@ async function renderDealers() {
             </div>
         `;
     } catch (error) {
-        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -2115,8 +2116,8 @@ async function renderTables() {
         content.innerHTML = `
             <div class="card">
                 <div class="card-header flex items-center justify-between">
-                    <span>桌台配置</span>
-                    <button class="btn btn-primary text-sm"><i class="fas fa-plus mr-1"></i>新增桌台</button>
+                    <span>桌台配置 <span class="badge badge-primary">${list.length}</span></span>
+                    <button onclick="showAddTable()" class="btn btn-primary text-sm"><i class="fas fa-plus mr-1"></i>新增桌台</button>
                 </div>
                 <div class="card-body">
                     <div class="overflow-x-auto">
@@ -2135,15 +2136,15 @@ async function renderTables() {
                             <tbody>
                                 ${list.map(table => `
                                     <tr>
-                                        <td class="font-medium">${table.table_code}</td>
-                                        <td>${table.table_name || '-'}</td>
-                                        <td><span class="badge badge-info">${table.game_type}</span></td>
-                                        <td>${table.dealer_name || '<span class="text-gray-400">空缺</span>'}</td>
+                                        <td class="font-medium">${escapeHtml(table.table_code)}</td>
+                                        <td>${escapeHtml(table.table_name || '-')}</td>
+                                        <td><span class="badge badge-info">${escapeHtml(table.game_type)}</span></td>
+                                        <td>${table.dealer_name ? escapeHtml(table.dealer_name) : '<span class="text-gray-400">空缺</span>'}</td>
                                         <td>¥${formatNumber(table.min_bet)} - ¥${formatNumber(table.max_bet)}</td>
                                         <td>${table.status === 1 ? '<span class="badge badge-success">正常</span>' : table.status === 0 ? '<span class="badge badge-warning">维护</span>' : '<span class="badge badge-danger">关闭</span>'}</td>
                                         <td>
-                                            <button class="text-blue-500 hover:text-blue-700 mr-2"><i class="fas fa-edit"></i></button>
-                                            <button class="text-purple-500 hover:text-purple-700"><i class="fas fa-video"></i></button>
+                                            <button onclick="editTable(${table.table_id})" class="text-blue-500 hover:text-blue-700 mr-2" title="编辑"><i class="fas fa-edit"></i></button>
+                                            <button onclick="deleteTable(${table.table_id}, '${escapeAttr(table.table_code)}')" class="text-red-500 hover:text-red-700" title="删除"><i class="fas fa-trash"></i></button>
                                         </td>
                                     </tr>
                                 `).join('')}
@@ -2154,7 +2155,7 @@ async function renderTables() {
             </div>
         `;
     } catch (error) {
-        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -2859,7 +2860,7 @@ async function renderAgentPerformance() {
     }
 }
 
-// 角色权限管理
+// 角色权限管理 - 增强版
 async function renderRoles() {
     const content = document.getElementById('pageContent');
     try {
@@ -2873,16 +2874,23 @@ async function renderRoles() {
         content.innerHTML = `
             <div class="grid grid-cols-2 gap-6">
                 <div class="card">
-                    <div class="card-header"><h3 class="text-lg font-semibold"><i class="fas fa-user-shield mr-2"></i>角色管理</h3></div>
+                    <div class="card-header flex items-center justify-between">
+                        <h3 class="text-lg font-semibold"><i class="fas fa-user-shield mr-2"></i>角色管理 <span class="badge badge-primary">${roles.length}</span></h3>
+                        <button onclick="showAddRole()" class="btn btn-primary text-sm"><i class="fas fa-plus mr-1"></i>新增角色</button>
+                    </div>
                     <div class="p-4">
                         <table class="data-table">
-                            <thead><tr><th>角色名称</th><th>描述</th><th>用户数</th></tr></thead>
+                            <thead><tr><th>角色名称</th><th>描述</th><th>用户数</th><th>操作</th></tr></thead>
                             <tbody>
                                 ${roles.map(r => `
                                     <tr>
                                         <td class="font-semibold">${escapeHtml(r.role_name || '')}</td>
                                         <td class="text-sm text-gray-600">${escapeHtml(r.description || '')}</td>
                                         <td><span class="badge badge-info">${r.user_count || 0}</span></td>
+                                        <td>
+                                            <button onclick="editRole(${r.role_id})" class="text-blue-500 hover:text-blue-700 mr-2" title="编辑"><i class="fas fa-edit"></i></button>
+                                            <button onclick="deleteRole(${r.role_id}, '${escapeAttr(r.role_name)}')" class="text-red-500 hover:text-red-700" title="删除"><i class="fas fa-trash"></i></button>
+                                        </td>
                                     </tr>
                                 `).join('')}
                             </tbody>
@@ -2939,4 +2947,555 @@ async function renderLoginLogs() {
     } catch (error) {
         content.innerHTML = '<div class="text-center text-red-500 py-10">加载失败: ' + escapeHtml(error.message) + '</div>';
     }
+}
+
+// ==================== V2.1.10 新增功能 ====================
+
+// 洗码方案 - 新增/编辑
+function showAddCommissionScheme() {
+    openModal(`
+        <div class="p-6" style="min-width: 550px;">
+            <h3 class="text-lg font-bold mb-4"><i class="fas fa-plus-circle text-purple-500 mr-2"></i>新增洗码方案</h3>
+            <form id="schemeForm" class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">方案名称 <span class="text-red-500">*</span></label>
+                        <input type="text" id="schemeName" class="form-input w-full" placeholder="如：VIP洗码方案" required>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">结算周期</label>
+                        <select id="schemeCycle" class="form-input w-full">
+                            <option value="0">实时结算</option>
+                            <option value="1" selected>日结</option>
+                            <option value="2">周结</option>
+                            <option value="3">月结</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">最低有效投注</label>
+                        <input type="number" id="schemeMinBet" class="form-input w-full" value="100" min="0">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">单日上限 (0=无限)</label>
+                        <input type="number" id="schemeDailyMax" class="form-input w-full" value="0" min="0">
+                    </div>
+                </div>
+                <div class="border rounded-lg p-4 bg-gray-50">
+                    <h4 class="text-sm font-semibold mb-3"><i class="fas fa-percent text-blue-500 mr-1"></i>返水比例设置 (%)</h4>
+                    <div class="grid grid-cols-4 gap-4">
+                        <div><label class="block text-xs text-gray-600 mb-1">百家乐</label><input type="number" id="rateBaccarat" class="form-input w-full" value="0.8" min="0" max="10" step="0.01"></div>
+                        <div><label class="block text-xs text-gray-600 mb-1">龙虎</label><input type="number" id="rateDragonTiger" class="form-input w-full" value="0.8" min="0" max="10" step="0.01"></div>
+                        <div><label class="block text-xs text-gray-600 mb-1">轮盘</label><input type="number" id="rateRoulette" class="form-input w-full" value="0.6" min="0" max="10" step="0.01"></div>
+                        <div><label class="block text-xs text-gray-600 mb-1">牛牛</label><input type="number" id="rateNiuniu" class="form-input w-full" value="0.7" min="0" max="10" step="0.01"></div>
+                    </div>
+                </div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">状态</label><select id="schemeStatus" class="form-input w-full"><option value="1">启用</option><option value="0">禁用</option></select></div>
+                <div class="flex justify-end gap-3 pt-4 border-t">
+                    <button type="button" onclick="closeModal()" class="btn btn-secondary">取消</button>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save mr-1"></i>保存</button>
+                </div>
+            </form>
+        </div>
+    `);
+    document.getElementById('schemeForm').onsubmit = async (e) => { e.preventDefault(); await submitCommissionScheme(); };
+}
+
+async function submitCommissionScheme(schemeId = null) {
+    const data = {
+        scheme_name: document.getElementById('schemeName').value.trim(),
+        settlement_cycle: parseInt(document.getElementById('schemeCycle').value),
+        min_valid_bet: parseFloat(document.getElementById('schemeMinBet').value) || 0,
+        daily_max_amount: parseFloat(document.getElementById('schemeDailyMax').value) || null,
+        baccarat_rate: (parseFloat(document.getElementById('rateBaccarat').value) || 0) / 100,
+        dragon_tiger_rate: (parseFloat(document.getElementById('rateDragonTiger').value) || 0) / 100,
+        roulette_rate: (parseFloat(document.getElementById('rateRoulette').value) || 0) / 100,
+        niuniu_rate: (parseFloat(document.getElementById('rateNiuniu').value) || 0) / 100,
+        status: parseInt(document.getElementById('schemeStatus').value)
+    };
+    if (!data.scheme_name) { alert('请输入方案名称'); return; }
+    try {
+        const url = schemeId ? `/commission/schemes/${schemeId}` : '/commission/schemes';
+        const res = await apiRequest(url, { method: schemeId ? 'PUT' : 'POST', body: JSON.stringify(data) });
+        if (res.success) { closeModal(); alert(schemeId ? '方案更新成功' : '方案创建成功'); loadPage('commission-schemes'); }
+        else { alert(res.message || '操作失败'); }
+    } catch (error) { alert('操作失败: ' + error.message); }
+}
+
+async function editCommissionScheme(schemeId) {
+    try {
+        const res = await apiRequest(`/commission/schemes/${schemeId}`);
+        if (!res.success) { alert('获取方案详情失败'); return; }
+        const s = res.data;
+        showAddCommissionScheme();
+        setTimeout(() => {
+            document.getElementById('schemeName').value = s.scheme_name || '';
+            document.getElementById('schemeCycle').value = s.settlement_cycle || 1;
+            document.getElementById('schemeMinBet').value = s.min_valid_bet || 0;
+            document.getElementById('schemeDailyMax').value = s.daily_max_amount || 0;
+            document.getElementById('rateBaccarat').value = (s.baccarat_rate || 0) * 100;
+            document.getElementById('rateDragonTiger').value = (s.dragon_tiger_rate || 0) * 100;
+            document.getElementById('rateRoulette').value = (s.roulette_rate || 0) * 100;
+            document.getElementById('rateNiuniu').value = (s.niuniu_rate || 0) * 100;
+            document.getElementById('schemeStatus').value = s.status;
+            document.querySelector('#schemeForm').previousElementSibling.innerHTML = '<i class="fas fa-edit text-purple-500 mr-2"></i>编辑洗码方案';
+            document.getElementById('schemeForm').onsubmit = async (e) => { e.preventDefault(); await submitCommissionScheme(schemeId); };
+        }, 100);
+    } catch (error) { alert('获取详情失败: ' + error.message); }
+}
+
+async function deleteCommissionScheme(schemeId, schemeName) {
+    if (!confirm(`确定删除方案 "${schemeName}" 吗？`)) return;
+    try {
+        const res = await apiRequest(`/commission/schemes/${schemeId}`, { method: 'DELETE' });
+        if (res.success) { alert('删除成功'); loadPage('commission-schemes'); }
+        else { alert(res.message || '删除失败'); }
+    } catch (error) { alert('删除失败: ' + error.message); }
+}
+
+// 新增荷官
+function showAddDealer() {
+    openModal(`
+        <div class="p-6" style="min-width: 500px;">
+            <h3 class="text-lg font-bold mb-4"><i class="fas fa-user-plus text-pink-500 mr-2"></i>新增荷官</h3>
+            <form id="dealerForm" class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">工号 <span class="text-red-500">*</span></label><input type="text" id="dealerStaffId" class="form-input w-full" placeholder="如：D001" required></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">状态</label><select id="dealerStatus" class="form-input w-full"><option value="1">在职</option><option value="2">休假</option><option value="0">离职</option></select></div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">中文艺名 <span class="text-red-500">*</span></label><input type="text" id="dealerNameCn" class="form-input w-full" placeholder="如：小美" required></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">英文艺名</label><input type="text" id="dealerNameEn" class="form-input w-full" placeholder="如：Mei"></div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">真实姓名</label><input type="text" id="dealerRealName" class="form-input w-full" placeholder="如：张美丽"></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">联系电话</label><input type="text" id="dealerPhone" class="form-input w-full" placeholder="如：13800138000"></div>
+                </div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">备注</label><textarea id="dealerRemark" class="form-input w-full" rows="2" placeholder="备注信息"></textarea></div>
+                <div class="flex justify-end gap-3 pt-4 border-t">
+                    <button type="button" onclick="closeModal()" class="btn btn-secondary">取消</button>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save mr-1"></i>保存</button>
+                </div>
+            </form>
+        </div>
+    `);
+    document.getElementById('dealerForm').onsubmit = async (e) => { e.preventDefault(); await submitDealer(); };
+}
+
+async function submitDealer(dealerId = null) {
+    const data = {
+        staff_id: document.getElementById('dealerStaffId').value.trim(),
+        stage_name_cn: document.getElementById('dealerNameCn').value.trim(),
+        stage_name_en: document.getElementById('dealerNameEn').value.trim() || null,
+        real_name: document.getElementById('dealerRealName').value.trim() || null,
+        phone: document.getElementById('dealerPhone').value.trim() || null,
+        remark: document.getElementById('dealerRemark').value.trim() || null,
+        status: parseInt(document.getElementById('dealerStatus').value)
+    };
+    if (!data.staff_id || !data.stage_name_cn) { alert('请填写工号和中文艺名'); return; }
+    try {
+        const url = dealerId ? `/dealers/${dealerId}` : '/dealers';
+        const res = await apiRequest(url, { method: dealerId ? 'PUT' : 'POST', body: JSON.stringify(data) });
+        if (res.success) { closeModal(); alert(dealerId ? '荷官信息更新成功' : '荷官添加成功'); loadPage('studio-dealers'); }
+        else { alert(res.message || '操作失败'); }
+    } catch (error) { alert('操作失败: ' + error.message); }
+}
+
+async function editDealer(dealerId) {
+    try {
+        const res = await apiRequest(`/dealers/${dealerId}`);
+        if (!res.success) { alert('获取荷官信息失败'); return; }
+        const d = res.data;
+        showAddDealer();
+        setTimeout(() => {
+            document.getElementById('dealerStaffId').value = d.staff_id || '';
+            document.getElementById('dealerNameCn').value = d.stage_name_cn || '';
+            document.getElementById('dealerNameEn').value = d.stage_name_en || '';
+            document.getElementById('dealerRealName').value = d.real_name || '';
+            document.getElementById('dealerPhone').value = d.phone || '';
+            document.getElementById('dealerRemark').value = d.remark || '';
+            document.getElementById('dealerStatus').value = d.status;
+            document.querySelector('#dealerForm').previousElementSibling.innerHTML = '<i class="fas fa-user-edit text-pink-500 mr-2"></i>编辑荷官信息';
+            document.getElementById('dealerForm').onsubmit = async (e) => { e.preventDefault(); await submitDealer(dealerId); };
+        }, 100);
+    } catch (error) { alert('获取详情失败: ' + error.message); }
+}
+
+// 新增桌台
+function showAddTable() {
+    openModal(`
+        <div class="p-6" style="min-width: 500px;">
+            <h3 class="text-lg font-bold mb-4"><i class="fas fa-plus-circle text-blue-500 mr-2"></i>新增桌台</h3>
+            <form id="tableForm" class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">桌台代码 <span class="text-red-500">*</span></label><input type="text" id="tableCode" class="form-input w-full" placeholder="如：A01" required></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">桌台名称</label><input type="text" id="tableName" class="form-input w-full" placeholder="如：贵宾厅1号桌"></div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">游戏类型 <span class="text-red-500">*</span></label><select id="tableGameType" class="form-input w-full" required><option value="baccarat">百家乐</option><option value="dragon_tiger">龙虎</option><option value="roulette">轮盘</option><option value="niuniu">牛牛</option><option value="sic_bo">骰宝</option></select></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">状态</label><select id="tableStatus" class="form-input w-full"><option value="1">正常</option><option value="0">维护</option><option value="-1">关闭</option></select></div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">最低投注</label><input type="number" id="tableMinBet" class="form-input w-full" value="100" min="0"></div>
+                    <div><label class="block text-sm font-medium text-gray-700 mb-1">最高投注</label><input type="number" id="tableMaxBet" class="form-input w-full" value="50000" min="0"></div>
+                </div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">视频流URL</label><input type="text" id="tableVideoUrl" class="form-input w-full" placeholder="rtmp://..."></div>
+                <div class="flex justify-end gap-3 pt-4 border-t">
+                    <button type="button" onclick="closeModal()" class="btn btn-secondary">取消</button>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save mr-1"></i>保存</button>
+                </div>
+            </form>
+        </div>
+    `);
+    document.getElementById('tableForm').onsubmit = async (e) => { e.preventDefault(); await submitTable(); };
+}
+
+async function submitTable(tableId = null) {
+    const data = {
+        table_code: document.getElementById('tableCode').value.trim(),
+        table_name: document.getElementById('tableName').value.trim() || null,
+        game_type: document.getElementById('tableGameType').value,
+        min_bet: parseFloat(document.getElementById('tableMinBet').value) || 100,
+        max_bet: parseFloat(document.getElementById('tableMaxBet').value) || 50000,
+        video_url: document.getElementById('tableVideoUrl').value.trim() || null,
+        status: parseInt(document.getElementById('tableStatus').value)
+    };
+    if (!data.table_code) { alert('请填写桌台代码'); return; }
+    if (data.min_bet >= data.max_bet) { alert('最低投注不能大于等于最高投注'); return; }
+    try {
+        const url = tableId ? `/tables/${tableId}` : '/tables';
+        const res = await apiRequest(url, { method: tableId ? 'PUT' : 'POST', body: JSON.stringify(data) });
+        if (res.success) { closeModal(); alert(tableId ? '桌台信息更新成功' : '桌台添加成功'); loadPage('studio-tables'); }
+        else { alert(res.message || '操作失败'); }
+    } catch (error) { alert('操作失败: ' + error.message); }
+}
+
+async function editTable(tableId) {
+    try {
+        const res = await apiRequest(`/tables/${tableId}`);
+        if (!res.success) { alert('获取桌台信息失败'); return; }
+        const t = res.data;
+        showAddTable();
+        setTimeout(() => {
+            document.getElementById('tableCode').value = t.table_code || '';
+            document.getElementById('tableName').value = t.table_name || '';
+            document.getElementById('tableGameType').value = t.game_type || 'baccarat';
+            document.getElementById('tableMinBet').value = t.min_bet || 100;
+            document.getElementById('tableMaxBet').value = t.max_bet || 50000;
+            document.getElementById('tableVideoUrl').value = t.video_url || '';
+            document.getElementById('tableStatus').value = t.status;
+            document.querySelector('#tableForm').previousElementSibling.innerHTML = '<i class="fas fa-edit text-blue-500 mr-2"></i>编辑桌台信息';
+            document.getElementById('tableForm').onsubmit = async (e) => { e.preventDefault(); await submitTable(tableId); };
+        }, 100);
+    } catch (error) { alert('获取详情失败: ' + error.message); }
+}
+
+// 角色权限管理 - 增强版
+function showAddRole() {
+    openModal(`
+        <div class="p-6" style="min-width: 500px;">
+            <h3 class="text-lg font-bold mb-4"><i class="fas fa-user-shield text-indigo-500 mr-2"></i>新增角色</h3>
+            <form id="roleForm" class="space-y-4">
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">角色名称 <span class="text-red-500">*</span></label><input type="text" id="roleName" class="form-input w-full" placeholder="如：财务主管" required></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">描述</label><input type="text" id="roleDesc" class="form-input w-full" placeholder="角色描述"></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-2">分配权限</label><div id="permissionCheckboxes" class="border rounded-lg p-4 max-h-64 overflow-y-auto bg-gray-50"><div class="text-center text-gray-500 py-2">加载权限列表...</div></div></div>
+                <div class="flex justify-end gap-3 pt-4 border-t">
+                    <button type="button" onclick="closeModal()" class="btn btn-secondary">取消</button>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save mr-1"></i>保存</button>
+                </div>
+            </form>
+        </div>
+    `);
+    loadPermissionsForRole();
+    document.getElementById('roleForm').onsubmit = async (e) => { e.preventDefault(); await submitRole(); };
+}
+
+async function loadPermissionsForRole(selectedPerms = []) {
+    try {
+        const res = await apiRequest('/admin/permissions');
+        const perms = res.data || [];
+        const container = document.getElementById('permissionCheckboxes');
+        const permGroups = {};
+        perms.forEach(p => { const g = p.permission_code?.split(':')[0] || 'other'; if (!permGroups[g]) permGroups[g] = []; permGroups[g].push(p); });
+        container.innerHTML = Object.entries(permGroups).map(([group, items]) => `
+            <div class="mb-3"><div class="font-semibold text-gray-700 mb-2 uppercase text-xs">${group}</div><div class="grid grid-cols-2 gap-2">${items.map(p => `<label class="flex items-center space-x-2 text-sm cursor-pointer hover:bg-white p-1 rounded"><input type="checkbox" name="perms" value="${p.permission_code}" ${selectedPerms.includes(p.permission_code) ? 'checked' : ''} class="rounded border-gray-300"><span>${escapeHtml(p.permission_name)}</span></label>`).join('')}</div></div>
+        `).join('');
+    } catch (error) { document.getElementById('permissionCheckboxes').innerHTML = '<div class="text-red-500 text-center">加载失败</div>'; }
+}
+
+async function submitRole(roleId = null) {
+    const selectedPerms = Array.from(document.querySelectorAll('input[name="perms"]:checked')).map(cb => cb.value);
+    const data = { role_name: document.getElementById('roleName').value.trim(), description: document.getElementById('roleDesc').value.trim() || null, permissions: selectedPerms.join(',') };
+    if (!data.role_name) { alert('请输入角色名称'); return; }
+    try {
+        const url = roleId ? `/admin/roles/${roleId}` : '/admin/roles';
+        const res = await apiRequest(url, { method: roleId ? 'PUT' : 'POST', body: JSON.stringify(data) });
+        if (res.success) { closeModal(); alert(roleId ? '角色更新成功' : '角色创建成功'); loadPage('admin-roles'); }
+        else { alert(res.message || '操作失败'); }
+    } catch (error) { alert('操作失败: ' + error.message); }
+}
+
+async function editRole(roleId) {
+    try {
+        const res = await apiRequest(`/admin/roles/${roleId}`);
+        if (!res.success) { alert('获取角色信息失败'); return; }
+        const r = res.data;
+        showAddRole();
+        setTimeout(async () => {
+            document.getElementById('roleName').value = r.role_name || '';
+            document.getElementById('roleDesc').value = r.description || '';
+            const perms = r.permissions ? r.permissions.split(',') : [];
+            await loadPermissionsForRole(perms);
+            document.querySelector('#roleForm').previousElementSibling.innerHTML = '<i class="fas fa-user-shield text-indigo-500 mr-2"></i>编辑角色';
+            document.getElementById('roleForm').onsubmit = async (e) => { e.preventDefault(); await submitRole(roleId); };
+        }, 100);
+    } catch (error) { alert('获取详情失败: ' + error.message); }
+}
+
+async function deleteRole(roleId, roleName) {
+    if (!confirm(`确定删除角色 "${roleName}" 吗？`)) return;
+    try {
+        const res = await apiRequest(`/admin/roles/${roleId}`, { method: 'DELETE' });
+        if (res.success) { alert('删除成功'); loadPage('system-roles'); }
+        else { alert(res.message || '删除失败'); }
+    } catch (error) { alert('删除失败: ' + error.message); }
+}
+
+// 角色权限管理 - 增强版
+async function renderRolesEnhanced() {
+    const content = document.getElementById('pageContent');
+    try {
+        const [rolesData, permsData] = await Promise.all([
+            apiRequest('/admin/roles'),
+            apiRequest('/admin/permissions')
+        ]);
+        const roles = rolesData.data || [];
+        const permissions = permsData.data || [];
+        
+        content.innerHTML = `
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="card">
+                    <div class="card-header flex items-center justify-between">
+                        <h3 class="text-lg font-semibold"><i class="fas fa-user-shield mr-2"></i>角色管理</h3>
+                        <button onclick="showAddRole()" class="btn btn-primary text-sm"><i class="fas fa-plus mr-1"></i>新增角色</button>
+                    </div>
+                    <div class="p-4">
+                        <table class="data-table">
+                            <thead><tr><th>角色名称</th><th>描述</th><th>用户数</th><th>操作</th></tr></thead>
+                            <tbody>
+                                ${roles.length === 0 ? '<tr><td colspan="4" class="text-center text-gray-500 py-4">暂无角色</td></tr>' : 
+                                roles.map(r => `
+                                    <tr>
+                                        <td class="font-semibold">${escapeHtml(r.role_name || '')}</td>
+                                        <td class="text-sm text-gray-600">${escapeHtml(r.description || '-')}</td>
+                                        <td><span class="badge badge-info">${r.user_count || 0}</span></td>
+                                        <td>
+                                            <button onclick="editRole(${r.role_id})" class="text-blue-500 hover:text-blue-700 mr-2" title="编辑"><i class="fas fa-edit"></i></button>
+                                            ${r.role_id > 2 ? `<button onclick="deleteRole(${r.role_id}, '${escapeAttr(r.role_name)}')" class="text-red-500 hover:text-red-700" title="删除"><i class="fas fa-trash"></i></button>` : ''}
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h3 class="text-lg font-semibold"><i class="fas fa-key mr-2"></i>权限列表 (${permissions.length})</h3></div>
+                    <div class="p-4 max-h-96 overflow-y-auto">
+                        ${Object.entries(permissions.reduce((acc, p) => {
+                            const mod = p.module || '其他';
+                            if (!acc[mod]) acc[mod] = [];
+                            acc[mod].push(p);
+                            return acc;
+                        }, {})).map(([module, perms]) => `
+                            <div class="mb-4">
+                                <h4 class="font-medium text-gray-700 mb-2">${escapeHtml(module)}</h4>
+                                <div class="flex flex-wrap gap-2">
+                                    ${perms.map(p => `<span class="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded" title="${escapeAttr(p.permission_code || '')}">${escapeHtml(p.permission_name || '')}</span>`).join('')}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        content.innerHTML = '<div class="text-center text-red-500 py-10">加载失败: ' + escapeHtml(error.message) + '</div>';
+    }
+}
+
+// 2FA设置页面
+async function render2FASettings() {
+    const content = document.getElementById('pageContent');
+    try {
+        const res = await apiRequest('/admin/2fa/status');
+        const enabled = res.data?.enabled || false;
+        
+        content.innerHTML = `
+            <div class="card max-w-2xl mx-auto">
+                <div class="card-header">
+                    <h3 class="text-lg font-semibold"><i class="fas fa-shield-alt mr-2 text-green-500"></i>双因素认证 (2FA)</h3>
+                </div>
+                <div class="p-6">
+                    <div class="text-center mb-6">
+                        <div class="w-24 h-24 mx-auto mb-4 rounded-full flex items-center justify-center ${enabled ? 'bg-green-100' : 'bg-gray-100'}">
+                            <i class="fas ${enabled ? 'fa-lock text-green-500' : 'fa-unlock text-gray-400'} text-4xl"></i>
+                        </div>
+                        <h4 class="text-xl font-bold ${enabled ? 'text-green-600' : 'text-gray-600'}">${enabled ? '已启用' : '未启用'}</h4>
+                        <p class="text-gray-500 mt-2">双因素认证为您的账户添加额外的安全层</p>
+                    </div>
+                    
+                    ${enabled ? `
+                        <div class="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+                            <div class="flex items-center">
+                                <i class="fas fa-check-circle text-green-500 mr-3 text-xl"></i>
+                                <div>
+                                    <h5 class="font-medium text-green-800">2FA已激活</h5>
+                                    <p class="text-green-600 text-sm">每次登录都需要验证码</p>
+                                </div>
+                            </div>
+                        </div>
+                        <button onclick="disable2FA()" class="btn btn-danger w-full"><i class="fas fa-times mr-2"></i>禁用2FA</button>
+                    ` : `
+                        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+                            <div class="flex items-center">
+                                <i class="fas fa-exclamation-triangle text-yellow-500 mr-3 text-xl"></i>
+                                <div>
+                                    <h5 class="font-medium text-yellow-800">建议启用2FA</h5>
+                                    <p class="text-yellow-600 text-sm">增强账户安全性</p>
+                                </div>
+                            </div>
+                        </div>
+                        <button onclick="show2FASetup()" class="btn btn-primary w-full"><i class="fas fa-shield-alt mr-2"></i>设置2FA</button>
+                    `}
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        content.innerHTML = '<div class="text-center text-red-500 py-10">加载失败: ' + escapeHtml(error.message) + '</div>';
+    }
+}
+
+// 2FA 绑定功能
+function show2FASetup() {
+    openModal(`
+        <div class="p-6" style="min-width: 400px;">
+            <h3 class="text-lg font-bold mb-4"><i class="fas fa-shield-alt text-green-500 mr-2"></i>绑定双重认证 (2FA)</h3>
+            <div id="twoFAContent" class="text-center"><div class="animate-spin w-8 h-8 border-4 border-green-500 border-t-transparent rounded-full mx-auto"></div><p class="mt-2 text-gray-500">正在生成二维码...</p></div>
+        </div>
+    `);
+    generate2FASecret();
+}
+
+async function generate2FASecret() {
+    try {
+        const res = await apiRequest('/admin/2fa/generate', { method: 'POST' });
+        if (!res.success) { document.getElementById('twoFAContent').innerHTML = '<div class="text-red-500">' + escapeHtml(res.message || '生成失败') + '</div>'; return; }
+        const { secret, qr_url } = res.data;
+        document.getElementById('twoFAContent').innerHTML = `
+            <div class="space-y-4">
+                <div class="bg-gray-100 p-4 rounded-lg"><p class="text-sm text-gray-600 mb-2">使用 Google Authenticator 或其他 2FA 应用扫描下方二维码：</p><img src="${qr_url}" alt="2FA QR Code" class="mx-auto w-48 h-48 border rounded"></div>
+                <div class="text-sm"><p class="text-gray-600">或手动输入密钥：</p><code class="block bg-gray-100 p-2 rounded mt-1 text-xs font-mono break-all">${secret}</code></div>
+                <div><label class="block text-sm font-medium text-gray-700 mb-1">输入验证码确认绑定：</label><input type="text" id="verifyCode" class="form-input w-full text-center text-lg tracking-widest" maxlength="6" placeholder="000000" pattern="[0-9]{6}"></div>
+                <div class="flex gap-3"><button onclick="closeModal()" class="btn btn-secondary flex-1">取消</button><button onclick="verify2FA('${secret}')" class="btn btn-success flex-1"><i class="fas fa-check mr-1"></i>确认绑定</button></div>
+            </div>
+        `;
+    } catch (error) { document.getElementById('twoFAContent').innerHTML = '<div class="text-red-500">生成失败: ' + escapeHtml(error.message) + '</div>'; }
+}
+
+async function verify2FA(secret) {
+    const code = document.getElementById('verifyCode').value.trim();
+    if (!/^\d{6}$/.test(code)) { alert('请输入6位数字验证码'); return; }
+    try {
+        const res = await apiRequest('/admin/2fa/enable', { method: 'POST', body: JSON.stringify({ secret, code }) });
+        if (res.success) { closeModal(); alert('2FA 绑定成功！下次登录将需要验证码。'); loadPage('admin-profile'); }
+        else { alert(res.message || '验证失败，请检查验证码'); }
+    } catch (error) { alert('验证失败: ' + error.message); }
+}
+
+async function disable2FA() {
+    if (!confirm('确定要关闭双重认证吗？这将降低账户安全性。')) return;
+    const password = prompt('请输入登录密码确认：');
+    if (!password) { alert('请输入密码'); return; }
+    try {
+        const res = await apiRequest('/admin/2fa/disable', { method: 'POST', body: JSON.stringify({ password }) });
+        if (res.success) { alert('2FA 已关闭'); loadPage('admin-profile'); }
+        else { alert(res.message || '关闭失败'); }
+    } catch (error) { alert('操作失败: ' + error.message); }
+}
+
+// 报表查询功能增强
+async function searchSettlementReport() {
+    const startDate = document.getElementById('settlementStartDate')?.value;
+    const endDate = document.getElementById('settlementEndDate')?.value;
+    if (!startDate || !endDate) { alert('请选择日期范围'); return; }
+    try {
+        const res = await apiRequest(`/reports/settlement?start_date=${startDate}&end_date=${endDate}`);
+        renderSettlementTable(res.data || []);
+    } catch (error) { alert('查询失败: ' + error.message); }
+}
+
+function renderSettlementTable(data) {
+    const tbody = document.querySelector('#settlementTable tbody');
+    if (!tbody) return;
+    tbody.innerHTML = data.length === 0 ? '<tr><td colspan="7" class="text-center text-gray-500 py-4">暂无数据</td></tr>' :
+        data.map(r => `<tr><td>${r.date}</td><td>${r.bet_count}</td><td>¥ ${formatNumber(r.total_bet)}</td><td>¥ ${formatNumber(r.valid_bet)}</td><td class="${r.total_win_loss >= 0 ? 'text-green-600' : 'text-red-600'}">${r.total_win_loss >= 0 ? '+' : ''}${formatNumber(r.total_win_loss)}</td><td class="${r.company_profit >= 0 ? 'text-green-600' : 'text-red-600'} font-bold">${r.company_profit >= 0 ? '+' : ''}${formatNumber(r.company_profit)}</td><td>${r.valid_bet > 0 ? ((r.company_profit / r.valid_bet) * 100).toFixed(2) : 0}%</td></tr>`).join('');
+}
+
+async function searchGameReport() {
+    const startDate = document.getElementById('gameStartDate')?.value;
+    const endDate = document.getElementById('gameEndDate')?.value;
+    if (!startDate || !endDate) { alert('请选择日期范围'); return; }
+    try {
+        const res = await apiRequest(`/reports/game?start_date=${startDate}&end_date=${endDate}`);
+        renderGameTable(res.data || []);
+    } catch (error) { alert('查询失败: ' + error.message); }
+}
+
+function renderGameTable(data) {
+    const tbody = document.querySelector('#gameTable tbody');
+    if (!tbody) return;
+    tbody.innerHTML = data.length === 0 ? '<tr><td colspan="6" class="text-center text-gray-500 py-4">暂无数据</td></tr>' :
+        data.map(r => `<tr><td><span class="badge badge-info">${escapeHtml(r.game_type || '')}</span></td><td>${r.bet_count || 0}</td><td>${formatMoney(r.total_bet)}</td><td>${formatMoney(r.valid_bet)}</td><td class="${parseFloat(r.total_win_loss) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(r.total_win_loss)}</td><td class="${parseFloat(r.company_profit) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(r.company_profit)}</td></tr>`).join('');
+}
+
+async function searchAgentPerformance() {
+    const startDate = document.getElementById('agentStartDate')?.value;
+    const endDate = document.getElementById('agentEndDate')?.value;
+    const keyword = document.getElementById('agentKeyword')?.value || '';
+    if (!startDate || !endDate) { alert('请选择日期范围'); return; }
+    try {
+        let url = `/reports/agent-performance?start_date=${startDate}&end_date=${endDate}`;
+        if (keyword) url += `&keyword=${encodeURIComponent(keyword)}`;
+        const res = await apiRequest(url);
+        renderAgentTable(res.data || []);
+    } catch (error) { alert('查询失败: ' + error.message); }
+}
+
+function renderAgentTable(data) {
+    const tbody = document.querySelector('#agentTable tbody');
+    if (!tbody) return;
+    tbody.innerHTML = data.length === 0 ? '<tr><td colspan="8" class="text-center text-gray-500 py-4">暂无数据</td></tr>' :
+        data.map(a => `<tr><td class="font-mono">${escapeHtml(a.agent_username || '')}</td><td>${escapeHtml(a.nickname || '')}</td><td>${getLevelBadge(a.level)}</td><td>${a.player_count || 0}</td><td>${formatMoney(a.total_bet)}</td><td>${formatMoney(a.valid_bet)}</td><td class="${parseFloat(a.total_win_loss) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(a.total_win_loss)}</td><td class="${parseFloat(a.company_profit) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(a.company_profit)}</td></tr>`).join('');
+}
+
+// 删除荷官
+async function deleteDealer(dealerId, name) {
+    if (!confirm(`确定删除荷官 "${name}" 吗？`)) return;
+    try {
+        const res = await apiRequest(`/dealers/${dealerId}`, { method: 'DELETE' });
+        if (res.success) { alert('删除成功'); loadPage('studio-dealers'); }
+        else { alert(res.message || '删除失败'); }
+    } catch (error) { alert('删除失败: ' + error.message); }
+}
+
+// 删除桌台
+async function deleteTable(tableId, code) {
+    if (!confirm(`确定删除桌台 "${code}" 吗？`)) return;
+    try {
+        const res = await apiRequest(`/tables/${tableId}`, { method: 'DELETE' });
+        if (res.success) { alert('删除成功'); loadPage('studio-tables'); }
+        else { alert(res.message || '删除失败'); }
+    } catch (error) { alert('删除失败: ' + error.message); }
 }
