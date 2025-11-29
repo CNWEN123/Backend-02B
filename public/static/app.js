@@ -71,7 +71,8 @@ const menuConfig = [
             { id: 'finance-transactions', title: '账户明细', page: 'finance-transactions' },
             { id: 'finance-deposits', title: '存款申请', page: 'finance-deposits' },
             { id: 'finance-withdrawals', title: '取款申请', page: 'finance-withdrawals' },
-            { id: 'finance-turnover', title: '流水稽核', page: 'finance-turnover' }
+            { id: 'finance-turnover', title: '流水稽核', page: 'finance-turnover' },
+            { id: 'finance-payment-methods', title: '收款方式', page: 'finance-payment-methods', badge: 'NEW' }
         ]
     },
     { 
@@ -296,6 +297,7 @@ function loadPage(page) {
         'finance-deposits': { title: '存款申请', handler: renderDeposits },
         'finance-withdrawals': { title: '取款申请', handler: renderWithdrawals },
         'finance-turnover': { title: '流水稽核', handler: renderTurnoverRules },
+        'finance-payment-methods': { title: '收款方式', handler: renderPaymentMethods },
         'bets': { title: '注单列表', handler: renderBets },
         'bets-realtime': { title: '实时注单', handler: renderRealtimeBets },
         'bets-special': { title: '特殊注单', handler: renderSpecialBets },
@@ -1060,6 +1062,429 @@ async function renderWithdrawals() {
         `;
     } catch (error) {
         content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+    }
+}
+
+// ==================== 收款方式管理 ====================
+async function renderPaymentMethods() {
+    const content = document.getElementById('pageContent');
+    
+    try {
+        const res = await apiRequest('/finance/payment-methods');
+        const { list, total } = res.data;
+        
+        // 类型映射
+        const typeMap = {
+            'crypto': { label: '加密货币', color: 'purple' },
+            'bank': { label: '银行卡', color: 'blue' },
+            'ewallet': { label: '电子钱包', color: 'green' },
+            'other': { label: '其他', color: 'gray' }
+        };
+        
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header flex items-center justify-between">
+                    <span>
+                        <i class="fas fa-credit-card mr-2"></i>收款方式管理
+                        <span class="badge badge-primary ml-2">${total || 0} 个</span>
+                    </span>
+                    <div class="flex space-x-2">
+                        <button onclick="showAddPaymentMethod()" class="btn btn-primary text-sm">
+                            <i class="fas fa-plus mr-1"></i>添加收款方式
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <!-- 筛选 -->
+                    <div class="flex flex-wrap gap-4 mb-4">
+                        <select id="filterType" onchange="filterPaymentMethods()" class="px-3 py-2 border rounded-lg">
+                            <option value="">全部类型</option>
+                            <option value="crypto">加密货币</option>
+                            <option value="bank">银行卡</option>
+                            <option value="ewallet">电子钱包</option>
+                            <option value="other">其他</option>
+                        </select>
+                        <select id="filterCurrency" onchange="filterPaymentMethods()" class="px-3 py-2 border rounded-lg">
+                            <option value="">全部币种</option>
+                            <option value="USDT">USDT</option>
+                            <option value="CNY">CNY</option>
+                            <option value="BTC">BTC</option>
+                            <option value="ETH">ETH</option>
+                        </select>
+                        <select id="filterStatus" onchange="filterPaymentMethods()" class="px-3 py-2 border rounded-lg">
+                            <option value="">全部状态</option>
+                            <option value="1">启用</option>
+                            <option value="0">禁用</option>
+                        </select>
+                    </div>
+                    
+                    ${list && list.length ? `
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            ${list.map(pm => {
+                                const type = typeMap[pm.method_type] || typeMap['other'];
+                                return `
+                                    <div class="border rounded-lg p-4 ${pm.status === 0 ? 'bg-gray-50 opacity-70' : 'bg-white'}">
+                                        <div class="flex items-center justify-between mb-3">
+                                            <div class="flex items-center">
+                                                <span class="w-10 h-10 bg-${type.color}-100 rounded-lg flex items-center justify-center mr-3">
+                                                    ${pm.method_type === 'crypto' ? '<i class="fab fa-bitcoin text-' + type.color + '-600 text-lg"></i>' :
+                                                      pm.method_type === 'bank' ? '<i class="fas fa-university text-' + type.color + '-600 text-lg"></i>' :
+                                                      pm.method_type === 'ewallet' ? '<i class="fas fa-wallet text-' + type.color + '-600 text-lg"></i>' :
+                                                      '<i class="fas fa-money-bill-wave text-' + type.color + '-600 text-lg"></i>'}
+                                                </span>
+                                                <div>
+                                                    <h4 class="font-medium">${escapeHtml(pm.method_name)}</h4>
+                                                    <span class="text-xs text-gray-500">${type.label} · ${pm.currency}</span>
+                                                </div>
+                                            </div>
+                                            <span class="badge ${pm.status === 1 ? 'badge-success' : 'badge-danger'}">
+                                                ${pm.status === 1 ? '启用' : '禁用'}
+                                            </span>
+                                        </div>
+                                        
+                                        <div class="space-y-2 text-sm text-gray-600 mb-3">
+                                            ${pm.account_name ? `<p><i class="fas fa-user w-5"></i>${escapeHtml(pm.account_name)}</p>` : ''}
+                                            ${pm.account_number ? `<p><i class="fas fa-key w-5"></i><span class="font-mono text-xs">${escapeHtml(pm.account_number.length > 20 ? pm.account_number.substring(0, 20) + '...' : pm.account_number)}</span></p>` : ''}
+                                            ${pm.bank_name ? `<p><i class="fas fa-building w-5"></i>${escapeHtml(pm.bank_name)}</p>` : ''}
+                                            <p><i class="fas fa-coins w-5"></i>限额: ${formatNumber(pm.min_amount)} ~ ${formatNumber(pm.max_amount)}</p>
+                                            ${pm.fee_type > 0 ? `<p><i class="fas fa-percentage w-5"></i>手续费: ${pm.fee_type === 1 ? formatNumber(pm.fee_amount) : (pm.fee_amount * 100).toFixed(2) + '%'}</p>` : ''}
+                                        </div>
+                                        
+                                        <div class="flex justify-end gap-2 pt-3 border-t">
+                                            <button onclick="editPaymentMethod(${pm.method_id})" class="btn btn-secondary text-xs">
+                                                <i class="fas fa-edit mr-1"></i>编辑
+                                            </button>
+                                            <button onclick="togglePaymentMethodStatus(${pm.method_id}, ${pm.status === 1 ? 0 : 1})" 
+                                                    class="btn ${pm.status === 1 ? 'btn-warning' : 'btn-success'} text-xs">
+                                                <i class="fas fa-${pm.status === 1 ? 'ban' : 'check'} mr-1"></i>
+                                                ${pm.status === 1 ? '禁用' : '启用'}
+                                            </button>
+                                            <button onclick="deletePaymentMethod(${pm.method_id}, '${escapeAttr(pm.method_name)}')" class="btn btn-danger text-xs">
+                                                <i class="fas fa-trash mr-1"></i>删除
+                                            </button>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    ` : `
+                        <div class="text-center text-gray-500 py-10">
+                            <i class="fas fa-credit-card text-4xl text-gray-300 mb-4"></i>
+                            <p>暂无收款方式</p>
+                            <button onclick="showAddPaymentMethod()" class="btn btn-primary mt-4">
+                                <i class="fas fa-plus mr-1"></i>添加第一个收款方式
+                            </button>
+                        </div>
+                    `}
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+    }
+}
+
+// 筛选收款方式
+async function filterPaymentMethods() {
+    const type = document.getElementById('filterType').value;
+    const currency = document.getElementById('filterCurrency').value;
+    const status = document.getElementById('filterStatus').value;
+    
+    let url = '/payment-methods?';
+    if (type) url += `method_type=${type}&`;
+    if (currency) url += `currency=${currency}&`;
+    if (status) url += `status=${status}&`;
+    
+    try {
+        const res = await apiRequest(url);
+        // 重新渲染列表部分
+        loadPage('finance-payment-methods');
+    } catch (error) {
+        alert('筛选失败: ' + error.message);
+    }
+}
+
+// 显示添加收款方式弹窗
+function showAddPaymentMethod() {
+    openModal(`
+        <div class="p-6" style="min-width: 500px;">
+            <h3 class="text-lg font-bold mb-4">
+                <i class="fas fa-plus-circle text-blue-500 mr-2"></i>添加收款方式
+            </h3>
+            <form id="paymentMethodForm" class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">收款方式名称 <span class="text-red-500">*</span></label>
+                        <input type="text" id="pmName" class="form-input w-full" placeholder="如：USDT-TRC20" required>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">类型 <span class="text-red-500">*</span></label>
+                        <select id="pmType" class="form-input w-full" required onchange="onPaymentTypeChange()">
+                            <option value="crypto">加密货币</option>
+                            <option value="bank">银行卡</option>
+                            <option value="ewallet">电子钱包</option>
+                            <option value="other">其他</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">币种</label>
+                        <select id="pmCurrency" class="form-input w-full">
+                            <option value="USDT">USDT</option>
+                            <option value="CNY">CNY (人民币)</option>
+                            <option value="BTC">BTC</option>
+                            <option value="ETH">ETH</option>
+                            <option value="USD">USD</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">排序</label>
+                        <input type="number" id="pmSort" class="form-input w-full" value="0" min="0">
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">收款人/钱包名称</label>
+                    <input type="text" id="pmAccountName" class="form-input w-full" placeholder="收款人姓名或钱包标识">
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">账号/钱包地址 <span class="text-red-500">*</span></label>
+                    <input type="text" id="pmAccountNumber" class="form-input w-full" placeholder="银行卡号或钱包地址" required>
+                </div>
+                
+                <div id="bankFields" class="grid grid-cols-2 gap-4" style="display: none;">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">银行名称</label>
+                        <input type="text" id="pmBankName" class="form-input w-full" placeholder="如：工商银行">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">开户行支行</label>
+                        <input type="text" id="pmBankBranch" class="form-input w-full" placeholder="如：北京分行">
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">收款二维码URL</label>
+                    <input type="url" id="pmQrCode" class="form-input w-full" placeholder="https://...">
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">最小金额</label>
+                        <input type="number" id="pmMinAmount" class="form-input w-full" value="100" min="0" step="0.01">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">最大金额</label>
+                        <input type="number" id="pmMaxAmount" class="form-input w-full" value="1000000" min="0" step="0.01">
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">手续费类型</label>
+                        <select id="pmFeeType" class="form-input w-full" onchange="onFeeTypeChange()">
+                            <option value="0">无手续费</option>
+                            <option value="1">固定费用</option>
+                            <option value="2">百分比</option>
+                        </select>
+                    </div>
+                    <div id="feeAmountField" style="display: none;">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">费用金额/比例</label>
+                        <input type="number" id="pmFeeAmount" class="form-input w-full" value="0" min="0" step="0.0001">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">状态</label>
+                        <select id="pmStatus" class="form-input w-full">
+                            <option value="1">启用</option>
+                            <option value="0">禁用</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">备注</label>
+                    <textarea id="pmRemark" class="form-input w-full" rows="2" placeholder="备注说明"></textarea>
+                </div>
+                
+                <div class="flex justify-end gap-3 pt-4 border-t">
+                    <button type="button" onclick="closeModal()" class="btn btn-secondary">取消</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save mr-1"></i>保存
+                    </button>
+                </div>
+            </form>
+        </div>
+    `);
+    
+    document.getElementById('paymentMethodForm').onsubmit = async (e) => {
+        e.preventDefault();
+        await submitPaymentMethod();
+    };
+}
+
+// 支付类型变更处理
+function onPaymentTypeChange() {
+    const type = document.getElementById('pmType').value;
+    const bankFields = document.getElementById('bankFields');
+    const currencySelect = document.getElementById('pmCurrency');
+    
+    if (type === 'bank') {
+        bankFields.style.display = 'grid';
+        currencySelect.value = 'CNY';
+    } else {
+        bankFields.style.display = 'none';
+        if (type === 'crypto') {
+            currencySelect.value = 'USDT';
+        }
+    }
+}
+
+// 手续费类型变更处理
+function onFeeTypeChange() {
+    const feeType = document.getElementById('pmFeeType').value;
+    const feeAmountField = document.getElementById('feeAmountField');
+    feeAmountField.style.display = feeType === '0' ? 'none' : 'block';
+}
+
+// 提交收款方式
+async function submitPaymentMethod(methodId = null) {
+    const data = {
+        method_name: document.getElementById('pmName').value.trim(),
+        method_type: document.getElementById('pmType').value,
+        currency: document.getElementById('pmCurrency').value,
+        account_name: document.getElementById('pmAccountName').value.trim(),
+        account_number: document.getElementById('pmAccountNumber').value.trim(),
+        bank_name: document.getElementById('pmBankName')?.value.trim() || '',
+        bank_branch: document.getElementById('pmBankBranch')?.value.trim() || '',
+        qr_code_url: document.getElementById('pmQrCode')?.value.trim() || '',
+        min_amount: parseFloat(document.getElementById('pmMinAmount').value) || 0,
+        max_amount: parseFloat(document.getElementById('pmMaxAmount').value) || 1000000,
+        fee_type: parseInt(document.getElementById('pmFeeType').value),
+        fee_amount: parseFloat(document.getElementById('pmFeeAmount')?.value) || 0,
+        status: parseInt(document.getElementById('pmStatus').value),
+        sort_order: parseInt(document.getElementById('pmSort')?.value) || 0,
+        remark: document.getElementById('pmRemark')?.value.trim() || ''
+    };
+    
+    if (!data.method_name) {
+        alert('请输入收款方式名称');
+        return;
+    }
+    if (!data.account_number) {
+        alert('请输入账号或钱包地址');
+        return;
+    }
+    
+    try {
+        const url = methodId ? `/payment-methods/${methodId}` : '/payment-methods';
+        const method = methodId ? 'PUT' : 'POST';
+        
+        const res = await apiRequest(url, {
+            method,
+            body: JSON.stringify(data)
+        });
+        
+        if (res.success) {
+            closeModal();
+            alert(methodId ? '收款方式更新成功' : '收款方式添加成功');
+            loadPage('finance-payment-methods');
+        } else {
+            alert(res.message || '操作失败');
+        }
+    } catch (error) {
+        alert('操作失败: ' + error.message);
+    }
+}
+
+// 编辑收款方式
+async function editPaymentMethod(methodId) {
+    try {
+        const res = await apiRequest(`/finance/payment-methods/${methodId}`);
+        if (!res.success) {
+            alert('获取收款方式详情失败');
+            return;
+        }
+        
+        const pm = res.data;
+        showAddPaymentMethod();
+        
+        // 填充表单
+        setTimeout(() => {
+            document.getElementById('pmName').value = pm.method_name || '';
+            document.getElementById('pmType').value = pm.method_type || 'crypto';
+            document.getElementById('pmCurrency').value = pm.currency || 'USDT';
+            document.getElementById('pmAccountName').value = pm.account_name || '';
+            document.getElementById('pmAccountNumber').value = pm.account_number || '';
+            document.getElementById('pmBankName').value = pm.bank_name || '';
+            document.getElementById('pmBankBranch').value = pm.bank_branch || '';
+            document.getElementById('pmQrCode').value = pm.qr_code_url || '';
+            document.getElementById('pmMinAmount').value = pm.min_amount || 0;
+            document.getElementById('pmMaxAmount').value = pm.max_amount || 1000000;
+            document.getElementById('pmFeeType').value = pm.fee_type || 0;
+            document.getElementById('pmFeeAmount').value = pm.fee_amount || 0;
+            document.getElementById('pmStatus').value = pm.status;
+            document.getElementById('pmSort').value = pm.sort_order || 0;
+            document.getElementById('pmRemark').value = pm.remark || '';
+            
+            // 触发类型变更
+            onPaymentTypeChange();
+            onFeeTypeChange();
+            
+            // 修改表单标题和提交处理
+            document.querySelector('#paymentMethodForm').previousElementSibling.innerHTML = 
+                '<i class="fas fa-edit text-blue-500 mr-2"></i>编辑收款方式';
+            document.getElementById('paymentMethodForm').onsubmit = async (e) => {
+                e.preventDefault();
+                await submitPaymentMethod(methodId);
+            };
+        }, 100);
+    } catch (error) {
+        alert('获取详情失败: ' + error.message);
+    }
+}
+
+// 切换收款方式状态
+async function togglePaymentMethodStatus(methodId, newStatus) {
+    const action = newStatus === 1 ? '启用' : '禁用';
+    if (!confirm(`确定要${action}此收款方式吗？`)) return;
+    
+    try {
+        const res = await apiRequest(`/finance/payment-methods/${methodId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ status: newStatus })
+        });
+        
+        if (res.success) {
+            alert(`收款方式已${action}`);
+            loadPage('finance-payment-methods');
+        } else {
+            alert(res.message || '操作失败');
+        }
+    } catch (error) {
+        alert('操作失败: ' + error.message);
+    }
+}
+
+// 删除收款方式
+async function deletePaymentMethod(methodId, methodName) {
+    if (!confirm(`确定要删除收款方式 "${methodName}" 吗？\n此操作不可恢复！`)) return;
+    
+    try {
+        const res = await apiRequest(`/finance/payment-methods/${methodId}`, {
+            method: 'DELETE'
+        });
+        
+        if (res.success) {
+            alert('收款方式已删除');
+            loadPage('finance-payment-methods');
+        } else {
+            alert(res.message || '删除失败');
+        }
+    } catch (error) {
+        alert('删除失败: ' + error.message);
     }
 }
 

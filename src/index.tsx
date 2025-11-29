@@ -208,6 +208,7 @@ app.use('/api/v1/tables/*', authMiddleware)
 app.use('/api/v1/shifts/*', authMiddleware)
 app.use('/api/v1/admin/*', authMiddleware)
 app.use('/api/v1/announcements/*', authMiddleware)
+app.use('/api/v1/payment-methods/*', authMiddleware)
 
 // ==================== 认证API ====================
 
@@ -1504,6 +1505,305 @@ app.get('/api/v1/finance/turnover-audit/:user_id', async (c) => {
   }
 })
 
+// ==================== 收款方式管理API ====================
+
+// 获取收款方式列表
+app.get('/api/v1/finance/payment-methods', async (c) => {
+  const { page, size } = validatePagination(c.req.query('page'), c.req.query('size'))
+  const method_type = c.req.query('method_type')
+  const status = c.req.query('status')
+  const currency = c.req.query('currency')
+  const offset = (page - 1) * size
+
+  try {
+    let where = 'WHERE 1=1'
+    const params: any[] = []
+    
+    if (method_type) {
+      where += ' AND method_type = ?'
+      params.push(method_type)
+    }
+    if (status !== undefined && status !== '') {
+      where += ' AND status = ?'
+      params.push(parseInt(status))
+    }
+    if (currency) {
+      where += ' AND currency = ?'
+      params.push(currency)
+    }
+
+    const countResult = await c.env.DB.prepare(
+      `SELECT COUNT(*) as total FROM payment_methods ${where}`
+    ).bind(...params).first()
+
+    const results = await c.env.DB.prepare(`
+      SELECT * FROM payment_methods ${where}
+      ORDER BY sort_order ASC, method_id ASC
+      LIMIT ? OFFSET ?
+    `).bind(...params, size, offset).all()
+
+    return c.json({
+      success: true,
+      data: {
+        total: countResult?.total || 0,
+        page,
+        size,
+        list: results.results || []
+      }
+    })
+  } catch (error) {
+    console.error('Get payment methods error:', error)
+    return c.json({ success: false, message: '获取收款方式列表失败' }, 500)
+  }
+})
+
+// 获取单个收款方式详情
+app.get('/api/v1/finance/payment-methods/:id', async (c) => {
+  const method_id = parseInt(c.req.param('id'))
+  
+  try {
+    const method = await c.env.DB.prepare(
+      'SELECT * FROM payment_methods WHERE method_id = ?'
+    ).bind(method_id).first()
+    
+    if (!method) {
+      return c.json({ success: false, message: '收款方式不存在' }, 404)
+    }
+    
+    return c.json({ success: true, data: method })
+  } catch (error) {
+    return c.json({ success: false, message: '获取收款方式详情失败' }, 500)
+  }
+})
+
+// 创建收款方式
+app.post('/api/v1/finance/payment-methods', async (c) => {
+  try {
+    const body = await c.req.json()
+    const {
+      method_name, method_type, currency = 'CNY',
+      account_name, account_number, bank_name, bank_branch, qr_code_url,
+      min_amount = 0, max_amount = 1000000, daily_limit = 0,
+      fee_type = 0, fee_amount = 0,
+      status = 1, sort_order = 0,
+      applicable_agents, applicable_vip_levels,
+      remark
+    } = body
+
+    // 验证必填字段
+    if (!method_name || !method_type) {
+      return c.json({ success: false, message: '收款方式名称和类型为必填项' }, 400)
+    }
+
+    // 验证类型
+    const validTypes = ['crypto', 'bank', 'ewallet', 'other']
+    if (!validTypes.includes(method_type)) {
+      return c.json({ success: false, message: '无效的收款方式类型' }, 400)
+    }
+
+    const admin = c.get('admin')
+    
+    const result = await c.env.DB.prepare(`
+      INSERT INTO payment_methods (
+        method_name, method_type, currency,
+        account_name, account_number, bank_name, bank_branch, qr_code_url,
+        min_amount, max_amount, daily_limit,
+        fee_type, fee_amount,
+        status, sort_order,
+        applicable_agents, applicable_vip_levels,
+        remark, created_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      method_name, method_type, currency,
+      account_name || null, account_number || null, bank_name || null, bank_branch || null, qr_code_url || null,
+      min_amount, max_amount, daily_limit,
+      fee_type, fee_amount,
+      status, sort_order,
+      applicable_agents ? JSON.stringify(applicable_agents) : null,
+      applicable_vip_levels ? JSON.stringify(applicable_vip_levels) : null,
+      remark || null, admin.admin_id
+    ).run()
+
+    // 记录操作日志
+    await c.env.DB.prepare(
+      `INSERT INTO audit_logs (admin_id, operation_type, target_table, target_id, remark, ip_address)
+       VALUES (?, 'CREATE', 'payment_method', ?, ?, ?)`
+    ).bind(admin.admin_id, result.meta.last_row_id, `创建收款方式: ${method_name}`, c.req.header('x-forwarded-for') || 'unknown').run()
+
+    return c.json({ 
+      success: true, 
+      message: '收款方式创建成功',
+      data: { method_id: result.meta.last_row_id }
+    })
+  } catch (error) {
+    console.error('Create payment method error:', error)
+    return c.json({ success: false, message: '创建收款方式失败' }, 500)
+  }
+})
+
+// 更新收款方式
+app.put('/api/v1/finance/payment-methods/:id', async (c) => {
+  const method_id = parseInt(c.req.param('id'))
+  
+  try {
+    const body = await c.req.json()
+    const {
+      method_name, method_type, currency,
+      account_name, account_number, bank_name, bank_branch, qr_code_url,
+      min_amount, max_amount, daily_limit,
+      fee_type, fee_amount,
+      status, sort_order,
+      applicable_agents, applicable_vip_levels,
+      remark
+    } = body
+
+    // 检查是否存在
+    const existing = await c.env.DB.prepare(
+      'SELECT method_id FROM payment_methods WHERE method_id = ?'
+    ).bind(method_id).first()
+    
+    if (!existing) {
+      return c.json({ success: false, message: '收款方式不存在' }, 404)
+    }
+
+    // 构建动态更新语句
+    const updates: string[] = []
+    const params: any[] = []
+
+    if (method_name !== undefined) { updates.push('method_name = ?'); params.push(method_name) }
+    if (method_type !== undefined) { updates.push('method_type = ?'); params.push(method_type) }
+    if (currency !== undefined) { updates.push('currency = ?'); params.push(currency) }
+    if (account_name !== undefined) { updates.push('account_name = ?'); params.push(account_name) }
+    if (account_number !== undefined) { updates.push('account_number = ?'); params.push(account_number) }
+    if (bank_name !== undefined) { updates.push('bank_name = ?'); params.push(bank_name) }
+    if (bank_branch !== undefined) { updates.push('bank_branch = ?'); params.push(bank_branch) }
+    if (qr_code_url !== undefined) { updates.push('qr_code_url = ?'); params.push(qr_code_url) }
+    if (min_amount !== undefined) { updates.push('min_amount = ?'); params.push(min_amount) }
+    if (max_amount !== undefined) { updates.push('max_amount = ?'); params.push(max_amount) }
+    if (daily_limit !== undefined) { updates.push('daily_limit = ?'); params.push(daily_limit) }
+    if (fee_type !== undefined) { updates.push('fee_type = ?'); params.push(fee_type) }
+    if (fee_amount !== undefined) { updates.push('fee_amount = ?'); params.push(fee_amount) }
+    if (status !== undefined) { updates.push('status = ?'); params.push(status) }
+    if (sort_order !== undefined) { updates.push('sort_order = ?'); params.push(sort_order) }
+    if (applicable_agents !== undefined) { updates.push('applicable_agents = ?'); params.push(JSON.stringify(applicable_agents)) }
+    if (applicable_vip_levels !== undefined) { updates.push('applicable_vip_levels = ?'); params.push(JSON.stringify(applicable_vip_levels)) }
+    if (remark !== undefined) { updates.push('remark = ?'); params.push(remark) }
+
+    if (updates.length === 0) {
+      return c.json({ success: false, message: '没有需要更新的字段' }, 400)
+    }
+
+    updates.push('updated_at = CURRENT_TIMESTAMP')
+    params.push(method_id)
+
+    await c.env.DB.prepare(
+      `UPDATE payment_methods SET ${updates.join(', ')} WHERE method_id = ?`
+    ).bind(...params).run()
+
+    // 记录操作日志
+    const admin = c.get('admin')
+    await c.env.DB.prepare(
+      `INSERT INTO audit_logs (admin_id, operation_type, target_table, target_id, remark, ip_address)
+       VALUES (?, 'UPDATE', 'payment_method', ?, ?, ?)`
+    ).bind(admin.admin_id, method_id, `更新收款方式ID: ${method_id}`, c.req.header('x-forwarded-for') || 'unknown').run()
+
+    return c.json({ success: true, message: '收款方式更新成功' })
+  } catch (error) {
+    console.error('Update payment method error:', error)
+    return c.json({ success: false, message: '更新收款方式失败' }, 500)
+  }
+})
+
+// 删除收款方式
+app.delete('/api/v1/finance/payment-methods/:id', async (c) => {
+  const method_id = parseInt(c.req.param('id'))
+  
+  try {
+    const existing = await c.env.DB.prepare(
+      'SELECT method_id, method_name FROM payment_methods WHERE method_id = ?'
+    ).bind(method_id).first()
+    
+    if (!existing) {
+      return c.json({ success: false, message: '收款方式不存在' }, 404)
+    }
+
+    await c.env.DB.prepare(
+      'DELETE FROM payment_methods WHERE method_id = ?'
+    ).bind(method_id).run()
+
+    // 记录操作日志
+    const admin = c.get('admin')
+    await c.env.DB.prepare(
+      `INSERT INTO audit_logs (admin_id, operation_type, target_table, target_id, remark, ip_address)
+       VALUES (?, 'DELETE', 'payment_method', ?, ?, ?)`
+    ).bind(admin.admin_id, method_id, `删除收款方式: ${existing.method_name}`, c.req.header('x-forwarded-for') || 'unknown').run()
+
+    return c.json({ success: true, message: '收款方式删除成功' })
+  } catch (error) {
+    console.error('Delete payment method error:', error)
+    return c.json({ success: false, message: '删除收款方式失败' }, 500)
+  }
+})
+
+// 切换收款方式状态
+app.post('/api/v1/finance/payment-methods/:id/toggle-status', async (c) => {
+  const method_id = parseInt(c.req.param('id'))
+  
+  try {
+    const existing = await c.env.DB.prepare(
+      'SELECT method_id, method_name, status FROM payment_methods WHERE method_id = ?'
+    ).bind(method_id).first()
+    
+    if (!existing) {
+      return c.json({ success: false, message: '收款方式不存在' }, 404)
+    }
+
+    const newStatus = existing.status === 1 ? 0 : 1
+    
+    await c.env.DB.prepare(
+      'UPDATE payment_methods SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE method_id = ?'
+    ).bind(newStatus, method_id).run()
+
+    // 记录操作日志
+    const admin = c.get('admin')
+    const statusText = newStatus === 1 ? '启用' : '禁用'
+    await c.env.DB.prepare(
+      `INSERT INTO audit_logs (admin_id, operation_type, target_table, target_id, remark, ip_address)
+       VALUES (?, 'UPDATE', 'payment_method', ?, ?, ?)`
+    ).bind(admin.admin_id, method_id, `${statusText}收款方式: ${existing.method_name}`, c.req.header('x-forwarded-for') || 'unknown').run()
+
+    return c.json({ 
+      success: true, 
+      message: `收款方式已${statusText}`,
+      data: { status: newStatus }
+    })
+  } catch (error) {
+    console.error('Toggle payment method status error:', error)
+    return c.json({ success: false, message: '切换状态失败' }, 500)
+  }
+})
+
+// 获取可用收款方式（前台用）
+app.get('/api/v1/finance/payment-methods/available', async (c) => {
+  try {
+    const results = await c.env.DB.prepare(`
+      SELECT method_id, method_name, method_type, currency, 
+             account_name, account_number, bank_name, qr_code_url,
+             min_amount, max_amount, fee_type, fee_amount
+      FROM payment_methods 
+      WHERE status = 1
+      ORDER BY sort_order ASC
+    `).all()
+
+    return c.json({
+      success: true,
+      data: results.results || []
+    })
+  } catch (error) {
+    return c.json({ success: false, message: '获取收款方式失败' }, 500)
+  }
+})
+
 // ==================== 注单管理API ====================
 
 app.get('/api/v1/bets', async (c) => {
@@ -2302,6 +2602,260 @@ app.get('/api/v1/reports/daily', async (c) => {
     return c.json({ success: true, data: result.results || [] })
   } catch (error) {
     return c.json({ success: false, message: '获取盈亏日报失败' }, 500)
+  }
+})
+
+// ==================== 收款方式管理API ====================
+
+// 获取收款方式列表
+app.get('/api/v1/payment-methods', async (c) => {
+  const { status, method_type, currency } = c.req.query()
+
+  try {
+    let where = 'WHERE 1=1'
+    const params: any[] = []
+
+    if (status !== undefined && status !== '') {
+      where += ' AND status = ?'
+      params.push(parseInt(status))
+    }
+    if (method_type) {
+      where += ' AND method_type = ?'
+      params.push(method_type)
+    }
+    if (currency) {
+      where += ' AND currency = ?'
+      params.push(currency)
+    }
+
+    const result = await c.env.DB.prepare(`
+      SELECT * FROM payment_methods ${where} ORDER BY sort_order ASC, method_id ASC
+    `).bind(...params).all()
+
+    return c.json({ 
+      success: true, 
+      data: {
+        list: result.results || [],
+        total: result.results?.length || 0
+      }
+    })
+  } catch (error) {
+    console.error('获取收款方式列表失败:', error)
+    return c.json({ success: false, message: '获取收款方式列表失败' }, 500)
+  }
+})
+
+// 获取单个收款方式详情
+app.get('/api/v1/payment-methods/:method_id', async (c) => {
+  const method_id = parseInt(c.req.param('method_id'))
+
+  try {
+    const method = await c.env.DB.prepare(`
+      SELECT * FROM payment_methods WHERE method_id = ?
+    `).bind(method_id).first()
+
+    if (!method) {
+      return c.json({ success: false, message: '收款方式不存在' }, 404)
+    }
+
+    return c.json({ success: true, data: method })
+  } catch (error) {
+    return c.json({ success: false, message: '获取收款方式详情失败' }, 500)
+  }
+})
+
+// 创建收款方式
+app.post('/api/v1/payment-methods', async (c) => {
+  try {
+    const body = await c.req.json()
+    const { 
+      method_name, method_type, currency = 'CNY',
+      account_name, account_number, bank_name, bank_branch, qr_code_url,
+      min_amount = 0, max_amount = 1000000, daily_limit = 0,
+      fee_type = 0, fee_amount = 0,
+      status = 1, sort_order = 0,
+      applicable_agents, applicable_vip_levels, remark
+    } = body
+
+    // 验证必填字段
+    if (!method_name || !method_type) {
+      return c.json({ success: false, message: '收款方式名称和类型为必填项' }, 400)
+    }
+
+    // 验证类型
+    const validTypes = ['crypto', 'bank', 'ewallet', 'other']
+    if (!validTypes.includes(method_type)) {
+      return c.json({ success: false, message: '无效的收款类型，可选: crypto/bank/ewallet/other' }, 400)
+    }
+
+    const admin = c.get('admin'); const adminId = admin?.admin_id
+
+    const result = await c.env.DB.prepare(`
+      INSERT INTO payment_methods (
+        method_name, method_type, currency,
+        account_name, account_number, bank_name, bank_branch, qr_code_url,
+        min_amount, max_amount, daily_limit,
+        fee_type, fee_amount,
+        status, sort_order,
+        applicable_agents, applicable_vip_levels, remark, created_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      method_name, method_type, currency,
+      account_name || null, account_number || null, bank_name || null, bank_branch || null, qr_code_url || null,
+      min_amount, max_amount, daily_limit,
+      fee_type, fee_amount,
+      status, sort_order,
+      JSON.stringify(applicable_agents || []), JSON.stringify(applicable_vip_levels || []), remark || null, adminId
+    ).run()
+
+    // 记录操作日志
+    await c.env.DB.prepare(`
+      INSERT INTO audit_logs (admin_id, operation_type, target_table, target_id, new_value)
+      VALUES (?, 'CREATE', 'payment_methods', ?, ?)
+    `).bind(adminId, result.meta?.last_row_id, JSON.stringify({ method_name, method_type, currency })).run()
+
+    return c.json({ 
+      success: true, 
+      message: '收款方式创建成功',
+      data: { method_id: result.meta?.last_row_id }
+    })
+  } catch (error) {
+    console.error('创建收款方式失败:', error)
+    return c.json({ success: false, message: '创建收款方式失败' }, 500)
+  }
+})
+
+// 更新收款方式
+app.put('/api/v1/payment-methods/:method_id', async (c) => {
+  const method_id = parseInt(c.req.param('method_id'))
+
+  try {
+    const body = await c.req.json()
+    const { 
+      method_name, method_type, currency,
+      account_name, account_number, bank_name, bank_branch, qr_code_url,
+      min_amount, max_amount, daily_limit,
+      fee_type, fee_amount,
+      status, sort_order,
+      applicable_agents, applicable_vip_levels, remark
+    } = body
+
+    // 检查是否存在
+    const existing = await c.env.DB.prepare(`
+      SELECT method_id FROM payment_methods WHERE method_id = ?
+    `).bind(method_id).first()
+
+    if (!existing) {
+      return c.json({ success: false, message: '收款方式不存在' }, 404)
+    }
+
+    // 构建更新字段
+    const updates: string[] = []
+    const params: any[] = []
+
+    if (method_name !== undefined) { updates.push('method_name = ?'); params.push(method_name) }
+    if (method_type !== undefined) { updates.push('method_type = ?'); params.push(method_type) }
+    if (currency !== undefined) { updates.push('currency = ?'); params.push(currency) }
+    if (account_name !== undefined) { updates.push('account_name = ?'); params.push(account_name) }
+    if (account_number !== undefined) { updates.push('account_number = ?'); params.push(account_number) }
+    if (bank_name !== undefined) { updates.push('bank_name = ?'); params.push(bank_name) }
+    if (bank_branch !== undefined) { updates.push('bank_branch = ?'); params.push(bank_branch) }
+    if (qr_code_url !== undefined) { updates.push('qr_code_url = ?'); params.push(qr_code_url) }
+    if (min_amount !== undefined) { updates.push('min_amount = ?'); params.push(min_amount) }
+    if (max_amount !== undefined) { updates.push('max_amount = ?'); params.push(max_amount) }
+    if (daily_limit !== undefined) { updates.push('daily_limit = ?'); params.push(daily_limit) }
+    if (fee_type !== undefined) { updates.push('fee_type = ?'); params.push(fee_type) }
+    if (fee_amount !== undefined) { updates.push('fee_amount = ?'); params.push(fee_amount) }
+    if (status !== undefined) { updates.push('status = ?'); params.push(status) }
+    if (sort_order !== undefined) { updates.push('sort_order = ?'); params.push(sort_order) }
+    if (applicable_agents !== undefined) { updates.push('applicable_agents = ?'); params.push(JSON.stringify(applicable_agents)) }
+    if (applicable_vip_levels !== undefined) { updates.push('applicable_vip_levels = ?'); params.push(JSON.stringify(applicable_vip_levels)) }
+    if (remark !== undefined) { updates.push('remark = ?'); params.push(remark) }
+
+    updates.push('updated_at = CURRENT_TIMESTAMP')
+    params.push(method_id)
+
+    await c.env.DB.prepare(`
+      UPDATE payment_methods SET ${updates.join(', ')} WHERE method_id = ?
+    `).bind(...params).run()
+
+    // 记录操作日志
+    const admin = c.get('admin'); const adminId = admin?.admin_id
+    await c.env.DB.prepare(`
+      INSERT INTO audit_logs (admin_id, operation_type, target_table, target_id, new_value)
+      VALUES (?, 'UPDATE', 'payment_method', ?, ?)
+    `).bind(adminId, method_id, JSON.stringify(body)).run()
+
+    return c.json({ success: true, message: '收款方式更新成功' })
+  } catch (error) {
+    console.error('更新收款方式失败:', error)
+    return c.json({ success: false, message: '更新收款方式失败' }, 500)
+  }
+})
+
+// 删除收款方式
+app.delete('/api/v1/payment-methods/:method_id', async (c) => {
+  const method_id = parseInt(c.req.param('method_id'))
+
+  try {
+    // 检查是否存在
+    const existing = await c.env.DB.prepare(`
+      SELECT method_id, method_name FROM payment_methods WHERE method_id = ?
+    `).bind(method_id).first()
+
+    if (!existing) {
+      return c.json({ success: false, message: '收款方式不存在' }, 404)
+    }
+
+    await c.env.DB.prepare(`
+      DELETE FROM payment_methods WHERE method_id = ?
+    `).bind(method_id).run()
+
+    // 记录操作日志
+    const admin = c.get('admin'); const adminId = admin?.admin_id
+    await c.env.DB.prepare(`
+      INSERT INTO audit_logs (admin_id, operation_type, target_table, target_id, new_value)
+      VALUES (?, 'DELETE', 'payment_method', ?, ?)
+    `).bind(adminId, method_id, JSON.stringify({ method_name: existing.method_name })).run()
+
+    return c.json({ success: true, message: '收款方式已删除' })
+  } catch (error) {
+    console.error('删除收款方式失败:', error)
+    return c.json({ success: false, message: '删除收款方式失败' }, 500)
+  }
+})
+
+// 批量更新收款方式状态
+app.post('/api/v1/payment-methods/batch-status', async (c) => {
+  try {
+    const { method_ids, status } = await c.req.json()
+
+    if (!Array.isArray(method_ids) || method_ids.length === 0) {
+      return c.json({ success: false, message: '请选择要操作的收款方式' }, 400)
+    }
+
+    if (status !== 0 && status !== 1) {
+      return c.json({ success: false, message: '无效的状态值' }, 400)
+    }
+
+    const placeholders = method_ids.map(() => '?').join(',')
+    await c.env.DB.prepare(`
+      UPDATE payment_methods SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE method_id IN (${placeholders})
+    `).bind(status, ...method_ids).run()
+
+    // 记录操作日志
+    const admin = c.get('admin'); const adminId = admin?.admin_id
+    await c.env.DB.prepare(`
+      INSERT INTO audit_logs (admin_id, operation_type, target_table, target_id, new_value)
+      VALUES (?, 'BATCH_STATUS', 'payment_method', 0, ?)
+    `).bind(adminId, JSON.stringify({ method_ids, status })).run()
+
+    return c.json({ 
+      success: true, 
+      message: `已${status === 1 ? '启用' : '禁用'} ${method_ids.length} 个收款方式`
+    })
+  } catch (error) {
+    return c.json({ success: false, message: '批量更新失败' }, 500)
   }
 })
 
