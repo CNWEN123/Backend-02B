@@ -3329,6 +3329,190 @@ app.get('/api/v1/reports/transfers/:transfer_id', async (c) => {
   }
 })
 
+// ==================== 转账手续费设置 ====================
+
+// 获取手续费规则列表
+app.get('/api/v1/transfer/fee-settings', async (c) => {
+  try {
+    const result = await c.env.DB.prepare(`
+      SELECT * FROM transfer_fee_settings ORDER BY priority DESC, fee_id ASC
+    `).all()
+    return c.json({ success: true, data: result.results || [] })
+  } catch (error) {
+    return c.json({ success: false, message: '获取手续费设置失败' }, 500)
+  }
+})
+
+// 获取单个手续费规则
+app.get('/api/v1/transfer/fee-settings/:fee_id', async (c) => {
+  const fee_id = parseInt(c.req.param('fee_id'))
+  try {
+    const rule = await c.env.DB.prepare(`
+      SELECT * FROM transfer_fee_settings WHERE fee_id = ?
+    `).bind(fee_id).first()
+    if (!rule) {
+      return c.json({ success: false, message: '规则不存在' }, 404)
+    }
+    return c.json({ success: true, data: rule })
+  } catch (error) {
+    return c.json({ success: false, message: '获取规则失败' }, 500)
+  }
+})
+
+// 新增手续费规则
+app.post('/api/v1/transfer/fee-settings', async (c) => {
+  const data = await c.req.json()
+  const { fee_name, fee_type, fee_value, min_fee, max_fee, min_amount, max_amount, transfer_type, vip_level, daily_free_count, status, priority, description } = data
+  
+  if (!fee_name || !fee_type) {
+    return c.json({ success: false, message: '规则名称和类型必填' }, 400)
+  }
+  
+  try {
+    const result = await c.env.DB.prepare(`
+      INSERT INTO transfer_fee_settings 
+      (fee_name, fee_type, fee_value, min_fee, max_fee, min_amount, max_amount, transfer_type, vip_level, daily_free_count, status, priority, description)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      fee_name, fee_type, fee_value || 0, min_fee || 0, max_fee || 0, 
+      min_amount || 0, max_amount || 0, transfer_type || 'all', 
+      vip_level || 0, daily_free_count || 0, status ?? 1, priority || 0, description || ''
+    ).run()
+    
+    return c.json({ success: true, message: '规则创建成功', fee_id: result.meta.last_row_id })
+  } catch (error) {
+    return c.json({ success: false, message: '创建规则失败' }, 500)
+  }
+})
+
+// 编辑手续费规则
+app.put('/api/v1/transfer/fee-settings/:fee_id', async (c) => {
+  const fee_id = parseInt(c.req.param('fee_id'))
+  const data = await c.req.json()
+  const { fee_name, fee_type, fee_value, min_fee, max_fee, min_amount, max_amount, transfer_type, vip_level, daily_free_count, status, priority, description } = data
+  
+  try {
+    const existing = await c.env.DB.prepare('SELECT * FROM transfer_fee_settings WHERE fee_id = ?').bind(fee_id).first()
+    if (!existing) {
+      return c.json({ success: false, message: '规则不存在' }, 404)
+    }
+    
+    await c.env.DB.prepare(`
+      UPDATE transfer_fee_settings SET
+        fee_name = ?, fee_type = ?, fee_value = ?, min_fee = ?, max_fee = ?,
+        min_amount = ?, max_amount = ?, transfer_type = ?, vip_level = ?,
+        daily_free_count = ?, status = ?, priority = ?, description = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE fee_id = ?
+    `).bind(
+      fee_name || existing.fee_name, fee_type || existing.fee_type, 
+      fee_value ?? existing.fee_value, min_fee ?? existing.min_fee, max_fee ?? existing.max_fee,
+      min_amount ?? existing.min_amount, max_amount ?? existing.max_amount, 
+      transfer_type || existing.transfer_type, vip_level ?? existing.vip_level,
+      daily_free_count ?? existing.daily_free_count, status ?? existing.status, 
+      priority ?? existing.priority, description ?? existing.description, fee_id
+    ).run()
+    
+    return c.json({ success: true, message: '规则更新成功' })
+  } catch (error) {
+    return c.json({ success: false, message: '更新规则失败' }, 500)
+  }
+})
+
+// 删除手续费规则
+app.delete('/api/v1/transfer/fee-settings/:fee_id', async (c) => {
+  const fee_id = parseInt(c.req.param('fee_id'))
+  try {
+    const result = await c.env.DB.prepare('DELETE FROM transfer_fee_settings WHERE fee_id = ?').bind(fee_id).run()
+    if (result.meta.changes === 0) {
+      return c.json({ success: false, message: '规则不存在' }, 404)
+    }
+    return c.json({ success: true, message: '规则已删除' })
+  } catch (error) {
+    return c.json({ success: false, message: '删除规则失败' }, 500)
+  }
+})
+
+// 切换手续费规则状态
+app.put('/api/v1/transfer/fee-settings/:fee_id/toggle', async (c) => {
+  const fee_id = parseInt(c.req.param('fee_id'))
+  try {
+    await c.env.DB.prepare(`
+      UPDATE transfer_fee_settings SET status = CASE WHEN status = 1 THEN 0 ELSE 1 END, updated_at = CURRENT_TIMESTAMP WHERE fee_id = ?
+    `).bind(fee_id).run()
+    return c.json({ success: true, message: '状态已切换' })
+  } catch (error) {
+    return c.json({ success: false, message: '切换状态失败' }, 500)
+  }
+})
+
+// 计算转账手续费 (供前端预览)
+app.post('/api/v1/transfer/calculate-fee', async (c) => {
+  const { amount, transfer_type, vip_level, daily_transfer_count } = await c.req.json()
+  
+  if (!amount || amount <= 0) {
+    return c.json({ success: false, message: '转账金额无效' }, 400)
+  }
+  
+  try {
+    // 获取所有启用的规则，按优先级排序
+    const rules = await c.env.DB.prepare(`
+      SELECT * FROM transfer_fee_settings 
+      WHERE status = 1 
+      ORDER BY priority DESC
+    `).all()
+    
+    let matchedRule = null
+    let fee = 0
+    
+    for (const rule of (rules.results || []) as any[]) {
+      // 检查转账类型匹配
+      if (rule.transfer_type !== 'all' && rule.transfer_type !== transfer_type) continue
+      
+      // 检查VIP等级匹配
+      if (rule.vip_level > 0 && (vip_level || 0) < rule.vip_level) continue
+      
+      // 检查金额范围
+      if (rule.min_amount > 0 && amount < rule.min_amount) continue
+      if (rule.max_amount > 0 && amount > rule.max_amount) continue
+      
+      // 匹配到规则
+      matchedRule = rule
+      
+      // 检查免费次数
+      if (rule.daily_free_count > 0 && (daily_transfer_count || 0) < rule.daily_free_count) {
+        fee = 0
+        break
+      }
+      
+      // 计算手续费
+      if (rule.fee_type === 'percent') {
+        fee = amount * rule.fee_value
+      } else {
+        fee = rule.fee_value
+      }
+      
+      // 应用最低最高限制
+      if (rule.min_fee > 0 && fee < rule.min_fee) fee = rule.min_fee
+      if (rule.max_fee > 0 && fee > rule.max_fee) fee = rule.max_fee
+      
+      break
+    }
+    
+    return c.json({ 
+      success: true, 
+      data: {
+        amount,
+        fee: Math.round(fee * 100) / 100,
+        actual_amount: Math.round((amount - fee) * 100) / 100,
+        matched_rule: matchedRule ? { fee_id: matchedRule.fee_id, fee_name: matchedRule.fee_name } : null
+      }
+    })
+  } catch (error) {
+    return c.json({ success: false, message: '计算手续费失败' }, 500)
+  }
+})
+
 // 盈亏日报
 app.get('/api/v1/reports/daily', async (c) => {
   const start_date = c.req.query('start_date') || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]

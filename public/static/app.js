@@ -4977,9 +4977,14 @@ async function renderTransferRecords() {
                         <i class="fas fa-exchange-alt mr-2 text-purple-500"></i>转账记录报表
                         <span class="badge badge-purple ml-2">会员互转</span>
                     </h3>
-                    <button onclick="exportTransfer()" class="btn btn-success text-sm">
-                        <i class="fas fa-file-excel mr-1"></i>导出Excel
-                    </button>
+                    <div class="flex space-x-2">
+                        <button onclick="showFeeSettings()" class="btn btn-outline text-sm">
+                            <i class="fas fa-cog mr-1"></i>手续费设置
+                        </button>
+                        <button onclick="exportTransfer()" class="btn btn-success text-sm">
+                            <i class="fas fa-file-excel mr-1"></i>导出Excel
+                        </button>
+                    </div>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
                     <div>
@@ -5409,6 +5414,296 @@ function exportTransfer() {
         { key: 'ip_address', label: '操作IP' },
         { key: 'remark', label: '备注' }
     ], '转账记录');
+}
+
+// ==================== 转账手续费设置 ====================
+async function showFeeSettings() {
+    try {
+        const res = await apiRequest('/transfer/fee-settings');
+        const rules = res.data || [];
+        
+        const feeTypeMap = { 'percent': '百分比', 'fixed': '固定金额' };
+        const transferTypeMap = { 'all': '全部', 'member': '会员互转', 'agent': '代理下发' };
+        
+        openModal(`
+            <div class="card-header flex items-center justify-between">
+                <span><i class="fas fa-cog mr-2 text-orange-500"></i>转账手续费设置</span>
+                <button onclick="showAddFeeRule()" class="btn btn-primary text-sm">
+                    <i class="fas fa-plus mr-1"></i>新增规则
+                </button>
+            </div>
+            <div class="p-4" style="max-height: 70vh; overflow-y: auto;">
+                <div class="text-sm text-gray-500 mb-4 bg-blue-50 p-3 rounded-lg">
+                    <i class="fas fa-info-circle mr-1"></i>
+                    规则按优先级从高到低匹配，匹配到第一个符合条件的规则后停止。VIP等级0表示适用所有等级。
+                </div>
+                
+                ${rules.length > 0 ? `
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>规则名称</th>
+                                <th>类型</th>
+                                <th>费率/金额</th>
+                                <th>限额范围</th>
+                                <th>适用类型</th>
+                                <th>VIP</th>
+                                <th>免费次数</th>
+                                <th>优先级</th>
+                                <th>状态</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rules.map(r => `
+                                <tr class="${r.status === 1 ? '' : 'bg-gray-100 opacity-60'}">
+                                    <td>
+                                        <div class="font-medium">${escapeHtml(r.fee_name)}</div>
+                                        ${r.description ? `<div class="text-xs text-gray-500">${escapeHtml(r.description)}</div>` : ''}
+                                    </td>
+                                    <td><span class="badge badge-${r.fee_type === 'percent' ? 'blue' : 'green'}">${feeTypeMap[r.fee_type]}</span></td>
+                                    <td class="font-mono">
+                                        ${r.fee_type === 'percent' ? 
+                                            `${(r.fee_value * 100).toFixed(2)}%` : 
+                                            formatMoney(r.fee_value)
+                                        }
+                                        ${(r.min_fee > 0 || r.max_fee > 0) ? 
+                                            `<div class="text-xs text-gray-500">${r.min_fee > 0 ? '最低'+formatMoney(r.min_fee) : ''}${r.max_fee > 0 ? ' 最高'+formatMoney(r.max_fee) : ''}</div>` : ''
+                                        }
+                                    </td>
+                                    <td class="text-xs">
+                                        ${r.min_amount > 0 ? formatMoney(r.min_amount) : '0'} ~ ${r.max_amount > 0 ? formatMoney(r.max_amount) : '不限'}
+                                    </td>
+                                    <td><span class="badge badge-outline">${transferTypeMap[r.transfer_type]}</span></td>
+                                    <td>${r.vip_level > 0 ? `VIP${r.vip_level}+` : '全部'}</td>
+                                    <td>${r.daily_free_count > 0 ? `${r.daily_free_count}次/日` : '-'}</td>
+                                    <td class="font-bold text-purple-600">${r.priority}</td>
+                                    <td>
+                                        <button onclick="toggleFeeRule(${r.fee_id})" class="badge badge-${r.status === 1 ? 'success' : 'secondary'} cursor-pointer">
+                                            ${r.status === 1 ? '启用' : '禁用'}
+                                        </button>
+                                    </td>
+                                    <td>
+                                        <div class="flex space-x-1">
+                                            <button onclick="editFeeRule(${r.fee_id})" class="text-blue-500 hover:text-blue-700" title="编辑">
+                                                <i class="fas fa-edit"></i>
+                                            </button>
+                                            <button onclick="deleteFeeRule(${r.fee_id}, '${escapeAttr(r.fee_name)}')" class="text-red-500 hover:text-red-700" title="删除">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                ` : `
+                    <div class="text-center text-gray-500 py-10">
+                        <i class="fas fa-inbox text-4xl mb-3"></i>
+                        <p>暂无手续费规则</p>
+                        <button onclick="showAddFeeRule()" class="btn btn-primary mt-3">新增规则</button>
+                    </div>
+                `}
+                
+                <div class="flex justify-end mt-4">
+                    <button onclick="closeModal()" class="btn btn-outline">关闭</button>
+                </div>
+            </div>
+        `, 'max-w-5xl');
+    } catch (error) {
+        alert('加载手续费设置失败: ' + error.message);
+    }
+}
+
+// 新增/编辑手续费规则弹窗
+function showAddFeeRule(ruleData = null) {
+    const isEdit = ruleData !== null;
+    const r = ruleData || {};
+    
+    openModal(`
+        <div class="card-header">
+            <i class="fas fa-${isEdit ? 'edit' : 'plus'} mr-2 text-orange-500"></i>
+            ${isEdit ? '编辑' : '新增'}手续费规则
+        </div>
+        <div class="p-6">
+            <form id="feeRuleForm" class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">规则名称 <span class="text-red-500">*</span></label>
+                        <input type="text" id="feeName" class="form-input w-full" value="${escapeAttr(r.fee_name || '')}" placeholder="如：默认手续费" required>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">优先级</label>
+                        <input type="number" id="feePriority" class="form-input w-full" value="${r.priority || 0}" min="0" placeholder="数值越大优先级越高">
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">手续费类型 <span class="text-red-500">*</span></label>
+                        <select id="feeType" class="form-input w-full" onchange="updateFeeValueLabel()">
+                            <option value="percent" ${r.fee_type === 'percent' ? 'selected' : ''}>百分比</option>
+                            <option value="fixed" ${r.fee_type === 'fixed' ? 'selected' : ''}>固定金额</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1" id="feeValueLabel">费率 (如0.01=1%)</label>
+                        <input type="number" id="feeValue" class="form-input w-full" value="${r.fee_value || 0}" step="0.0001" min="0">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">每日免费次数</label>
+                        <input type="number" id="feeFreeCount" class="form-input w-full" value="${r.daily_free_count || 0}" min="0" placeholder="0=无免费">
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">最低手续费</label>
+                        <input type="number" id="feeMin" class="form-input w-full" value="${r.min_fee || 0}" step="0.01" min="0">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">最高手续费 (0=不限)</label>
+                        <input type="number" id="feeMax" class="form-input w-full" value="${r.max_fee || 0}" step="0.01" min="0">
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">最低转账金额</label>
+                        <input type="number" id="feeMinAmount" class="form-input w-full" value="${r.min_amount || 0}" step="0.01" min="0">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">最高转账金额 (0=不限)</label>
+                        <input type="number" id="feeMaxAmount" class="form-input w-full" value="${r.max_amount || 0}" step="0.01" min="0">
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">适用类型</label>
+                        <select id="feeTransferType" class="form-input w-full">
+                            <option value="all" ${r.transfer_type === 'all' ? 'selected' : ''}>全部</option>
+                            <option value="member" ${r.transfer_type === 'member' ? 'selected' : ''}>会员互转</option>
+                            <option value="agent" ${r.transfer_type === 'agent' ? 'selected' : ''}>代理下发</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">适用VIP等级</label>
+                        <select id="feeVipLevel" class="form-input w-full">
+                            <option value="0" ${r.vip_level == 0 ? 'selected' : ''}>全部等级</option>
+                            ${[1,2,3,4,5,6,7,8,9,10].map(v => `<option value="${v}" ${r.vip_level == v ? 'selected' : ''}>VIP${v}及以上</option>`).join('')}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">状态</label>
+                        <select id="feeStatus" class="form-input w-full">
+                            <option value="1" ${r.status !== 0 ? 'selected' : ''}>启用</option>
+                            <option value="0" ${r.status === 0 ? 'selected' : ''}>禁用</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">描述说明</label>
+                    <textarea id="feeDescription" class="form-input w-full" rows="2" placeholder="规则说明">${escapeHtml(r.description || '')}</textarea>
+                </div>
+                
+                <div class="flex justify-end space-x-2 pt-4 border-t">
+                    <button type="button" onclick="showFeeSettings()" class="btn btn-outline">返回列表</button>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save mr-1"></i>保存</button>
+                </div>
+            </form>
+        </div>
+    `, 'max-w-2xl');
+    
+    updateFeeValueLabel();
+    
+    document.getElementById('feeRuleForm').onsubmit = async (e) => {
+        e.preventDefault();
+        await submitFeeRule(isEdit ? r.fee_id : null);
+    };
+}
+
+function updateFeeValueLabel() {
+    const type = document.getElementById('feeType').value;
+    const label = document.getElementById('feeValueLabel');
+    label.textContent = type === 'percent' ? '费率 (如0.01=1%)' : '固定金额';
+}
+
+async function submitFeeRule(feeId) {
+    const data = {
+        fee_name: document.getElementById('feeName').value,
+        fee_type: document.getElementById('feeType').value,
+        fee_value: parseFloat(document.getElementById('feeValue').value) || 0,
+        min_fee: parseFloat(document.getElementById('feeMin').value) || 0,
+        max_fee: parseFloat(document.getElementById('feeMax').value) || 0,
+        min_amount: parseFloat(document.getElementById('feeMinAmount').value) || 0,
+        max_amount: parseFloat(document.getElementById('feeMaxAmount').value) || 0,
+        transfer_type: document.getElementById('feeTransferType').value,
+        vip_level: parseInt(document.getElementById('feeVipLevel').value) || 0,
+        daily_free_count: parseInt(document.getElementById('feeFreeCount').value) || 0,
+        status: parseInt(document.getElementById('feeStatus').value),
+        priority: parseInt(document.getElementById('feePriority').value) || 0,
+        description: document.getElementById('feeDescription').value
+    };
+    
+    try {
+        const url = feeId ? `/transfer/fee-settings/${feeId}` : '/transfer/fee-settings';
+        const method = feeId ? 'PUT' : 'POST';
+        
+        const res = await apiRequest(url, { method, body: JSON.stringify(data) });
+        
+        if (res.success) {
+            alert(feeId ? '规则更新成功' : '规则创建成功');
+            showFeeSettings();
+        } else {
+            alert(res.message || '操作失败');
+        }
+    } catch (error) {
+        alert('操作失败: ' + error.message);
+    }
+}
+
+async function editFeeRule(feeId) {
+    try {
+        const res = await apiRequest(`/transfer/fee-settings/${feeId}`);
+        if (res.success) {
+            showAddFeeRule(res.data);
+        } else {
+            alert('获取规则详情失败');
+        }
+    } catch (error) {
+        alert('获取规则详情失败: ' + error.message);
+    }
+}
+
+async function deleteFeeRule(feeId, feeName) {
+    if (!confirm(`确定要删除规则「${feeName}」吗？`)) return;
+    
+    try {
+        const res = await apiRequest(`/transfer/fee-settings/${feeId}`, { method: 'DELETE' });
+        if (res.success) {
+            alert('规则已删除');
+            showFeeSettings();
+        } else {
+            alert(res.message || '删除失败');
+        }
+    } catch (error) {
+        alert('删除失败: ' + error.message);
+    }
+}
+
+async function toggleFeeRule(feeId) {
+    try {
+        const res = await apiRequest(`/transfer/fee-settings/${feeId}/toggle`, { method: 'PUT' });
+        if (res.success) {
+            showFeeSettings();
+        } else {
+            alert(res.message || '切换状态失败');
+        }
+    } catch (error) {
+        alert('切换状态失败: ' + error.message);
+    }
 }
 
 // 角色权限管理 - 增强版
