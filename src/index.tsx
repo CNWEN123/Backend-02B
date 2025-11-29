@@ -745,17 +745,34 @@ app.post('/api/v1/players/:user_id/kick', async (c) => {
   }
   
   const admin = c.get('admin')
-  const { reason } = await c.req.json()
   const clientIP = getClientIP(c)
+  
+  // 安全解析body
+  let reason = '管理员踢线'
+  try {
+    const body = await c.req.json()
+    if (body && body.reason) {
+      reason = body.reason
+    }
+  } catch (e) {
+    // 没有body或解析失败,使用默认值
+  }
 
   try {
+    // 检查玩家是否存在
+    const user = await c.env.DB.prepare('SELECT user_id, username FROM users WHERE user_id = ?').bind(user_id).first()
+    if (!user) {
+      return c.json({ success: false, message: '玩家不存在' }, 404)
+    }
+
     // 记录操作日志
     await c.env.DB.prepare(
       'INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, target_id, new_value, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).bind(admin.admin_id, admin.username, 'KICK_PLAYER', 'users', user_id, reason || '管理员踢线', clientIP).run()
+    ).bind(admin.admin_id, admin.username, 'KICK_PLAYER', 'users', user_id, reason, clientIP).run()
 
     return c.json({ success: true, message: '踢线成功' })
   } catch (error) {
+    console.error('Kick player error:', error)
     return c.json({ success: false, message: '踢线失败' }, 500)
   }
 })
@@ -2850,7 +2867,7 @@ function loginPage() {
                 </label>
                 <input type="password" id="password" name="password"
                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition"
-                       placeholder="请输入密码" value="123456" required>
+                       placeholder="请输入密码" required>
             </div>
             
             <div>

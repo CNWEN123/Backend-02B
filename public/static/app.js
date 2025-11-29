@@ -77,8 +77,12 @@ const menuConfig = [
     { 
         id: 'bets', 
         icon: 'fa-list-alt', 
-        title: '注单管理', 
-        page: 'bets' 
+        title: '注单管理',
+        children: [
+            { id: 'bets', title: '注单列表', page: 'bets' },
+            { id: 'bets-realtime', title: '实时注单', page: 'bets-realtime' },
+            { id: 'bets-special', title: '特殊注单', page: 'bets-special' }
+        ]
     },
     { 
         id: 'commission', 
@@ -108,7 +112,8 @@ const menuConfig = [
             { id: 'reports-settlement', title: '结算报表', page: 'reports-settlement' },
             { id: 'reports-ranking', title: '盈亏排行', page: 'reports-ranking' },
             { id: 'reports-game', title: '游戏报表', page: 'reports-game' },
-            { id: 'reports-daily', title: '盈亏日报', page: 'reports-daily' }
+            { id: 'reports-daily', title: '盈亏日报', page: 'reports-daily' },
+            { id: 'reports-agent', title: '代理业绩', page: 'reports-agent' }
         ]
     },
     { 
@@ -123,7 +128,9 @@ const menuConfig = [
         title: '系统控制',
         children: [
             { id: 'system-admins', title: '账号管理', page: 'system-admins' },
-            { id: 'system-logs', title: '操作日志', page: 'system-logs' }
+            { id: 'system-roles', title: '角色权限', page: 'system-roles' },
+            { id: 'system-logs', title: '操作日志', page: 'system-logs' },
+            { id: 'system-login-logs', title: '登录日志', page: 'system-login-logs' }
         ]
     },
     { 
@@ -290,6 +297,8 @@ function loadPage(page) {
         'finance-withdrawals': { title: '取款申请', handler: renderWithdrawals },
         'finance-turnover': { title: '流水稽核', handler: renderTurnoverRules },
         'bets': { title: '注单列表', handler: renderBets },
+        'bets-realtime': { title: '实时注单', handler: renderRealtimeBets },
+        'bets-special': { title: '特殊注单', handler: renderSpecialBets },
         'commission-schemes': { title: '洗码方案', handler: renderCommissionSchemes },
         'commission-records': { title: '洗码记录', handler: renderCommissionRecords },
         'risk-alerts': { title: '风控预警', handler: renderRiskAlerts },
@@ -299,9 +308,12 @@ function loadPage(page) {
         'reports-ranking': { title: '盈亏排行', handler: renderRanking },
         'reports-game': { title: '游戏报表', handler: renderGameReport },
         'reports-daily': { title: '盈亏日报', handler: renderDailyReport },
+        'reports-agent': { title: '代理业绩', handler: renderAgentPerformance },
         'announcements': { title: '公告管理', handler: renderAnnouncements },
         'system-admins': { title: '账号管理', handler: renderAdmins },
+        'system-roles': { title: '角色权限', handler: renderRoles },
         'system-logs': { title: '操作日志', handler: renderAuditLogs },
+        'system-login-logs': { title: '登录日志', handler: renderLoginLogs },
         'studio-dealers': { title: '荷官档案', handler: renderDealers },
         'studio-tables': { title: '桌台管理', handler: renderTables },
         'studio-shifts': { title: '智能排班', handler: renderShifts }
@@ -968,7 +980,7 @@ async function renderDeposits() {
                                     ${list.map(d => `
                                         <tr>
                                             <td class="font-mono text-sm">${d.order_no}</td>
-                                            <td>${d.username}</td>
+                                            <td>${escapeHtml(d.username || '')}</td>
                                             <td class="text-green-600 font-medium">+${formatNumber(d.amount)}</td>
                                             <td>${getAuditStatusBadge(d.audit_status)}</td>
                                             <td>${formatDate(d.created_at)}</td>
@@ -1021,7 +1033,7 @@ async function renderWithdrawals() {
                                     ${list.map(w => `
                                         <tr>
                                             <td class="font-mono text-sm">${w.order_no}</td>
-                                            <td>${w.username}</td>
+                                            <td>${escapeHtml(w.username || '')}</td>
                                             <td class="text-red-600 font-medium">${formatNumber(w.amount)}</td>
                                             <td>${w.flow_check ? '<span class="badge badge-success">已达标</span>' : '<span class="badge badge-danger">未达标</span>'}</td>
                                             <td>${getAuditStatusBadge(w.audit_status)}</td>
@@ -1366,7 +1378,7 @@ async function renderCommissionRecords() {
                             <tbody>
                                 ${list.map(r => `
                                     <tr>
-                                        <td>${r.username}</td>
+                                        <td>${escapeHtml(r.username || '')}</td>
                                         <td>${r.scheme_name}</td>
                                         <td>${r.game_type}</td>
                                         <td>¥ ${formatNumber(r.valid_bet_amount)}</td>
@@ -1658,7 +1670,7 @@ async function renderRanking() {
                                             ${i + 1}
                                         </span>
                                         <div>
-                                            <div class="font-medium">${p.username}</div>
+                                            <div class="font-medium">${escapeHtml(p.username || '')}</div>
                                             <div class="text-xs text-gray-500">VIP${p.vip_level} | ${p.agent_username || '-'}</div>
                                         </div>
                                     </div>
@@ -1686,7 +1698,7 @@ async function renderRanking() {
                                             ${i + 1}
                                         </span>
                                         <div>
-                                            <div class="font-medium">${p.username}</div>
+                                            <div class="font-medium">${escapeHtml(p.username || '')}</div>
                                             <div class="text-xs text-gray-500">VIP${p.vip_level} | ${p.agent_username || '-'}</div>
                                         </div>
                                     </div>
@@ -2173,6 +2185,532 @@ async function renderShifts() {
         `;
     } catch (error) {
         content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+    }
+}
+
+// ==================== 实时注单监控 ====================
+async function renderRealtimeBets() {
+    const content = document.getElementById('content');
+    try {
+        const data = await apiRequest('/bets/realtime');
+        const bets = data.data || [];
+        
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="text-lg font-semibold">
+                        <i class="fas fa-broadcast-tower mr-2 text-red-500"></i>
+                        实时注单监控
+                        <span class="badge badge-danger ml-2">${bets.length}</span>
+                    </h3>
+                    <button onclick="renderRealtimeBets()" class="btn btn-primary text-sm">
+                        <i class="fas fa-sync-alt mr-1"></i> 刷新
+                    </button>
+                </div>
+                <div class="p-4">
+                    <div class="overflow-x-auto">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>注单号</th>
+                                    <th>会员账号</th>
+                                    <th>游戏类型</th>
+                                    <th>桌台</th>
+                                    <th>局号</th>
+                                    <th>下注金额</th>
+                                    <th>下注内容</th>
+                                    <th>下注时间</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${bets.length === 0 ? '<tr><td colspan="8" class="text-center py-4 text-gray-500">暂无实时注单</td></tr>' : 
+                                bets.map(bet => `
+                                    <tr class="hover:bg-gray-50">
+                                        <td class="font-mono text-sm">${escapeHtml(bet.bet_no || '')}</td>
+                                        <td>${escapeHtml(bet.username || '')}</td>
+                                        <td><span class="badge badge-info">${escapeHtml(bet.game_type || '')}</span></td>
+                                        <td>${escapeHtml(bet.table_no || '')}</td>
+                                        <td>${escapeHtml(bet.round_no || '')}</td>
+                                        <td class="font-semibold text-blue-600">${formatMoney(bet.bet_amount)}</td>
+                                        <td>${formatBetDetail(bet.bet_detail)}</td>
+                                        <td class="text-sm text-gray-500">${formatDate(bet.created_at)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // 自动刷新
+        setTimeout(() => {
+            if (currentPage === 'bets-realtime') {
+                renderRealtimeBets();
+            }
+        }, 10000);
+    } catch (error) {
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+// ==================== 特殊注单监控 ====================
+async function renderSpecialBets() {
+    const content = document.getElementById('content');
+    try {
+        const data = await apiRequest('/bets/special');
+        const bets = data.data || [];
+        
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="text-lg font-semibold">
+                        <i class="fas fa-exclamation-triangle mr-2 text-orange-500"></i>
+                        特殊注单监控
+                        <span class="badge badge-warning ml-2">${bets.length}</span>
+                    </h3>
+                    <button onclick="renderSpecialBets()" class="btn btn-primary text-sm">
+                        <i class="fas fa-sync-alt mr-1"></i> 刷新
+                    </button>
+                </div>
+                <div class="p-4">
+                    <div class="mb-4 p-3 bg-orange-50 rounded-lg text-sm text-orange-700">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        特殊注单包括: 高赔率注单 (>5倍), 三宝, 围骰, 对子等高风险下注
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>注单号</th>
+                                    <th>会员账号</th>
+                                    <th>游戏类型</th>
+                                    <th>特殊类型</th>
+                                    <th>下注金额</th>
+                                    <th>赔率</th>
+                                    <th>下注内容</th>
+                                    <th>下注时间</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${bets.length === 0 ? '<tr><td colspan="9" class="text-center py-4 text-gray-500">暂无特殊注单</td></tr>' : 
+                                bets.map(bet => `
+                                    <tr class="hover:bg-gray-50 ${parseFloat(bet.odds) > 5 ? 'bg-red-50' : ''}">
+                                        <td class="font-mono text-sm">${escapeHtml(bet.bet_no || '')}</td>
+                                        <td>${escapeHtml(bet.username || '')}</td>
+                                        <td><span class="badge badge-info">${escapeHtml(bet.game_type || '')}</span></td>
+                                        <td><span class="badge badge-warning">${escapeHtml(bet.special_type || '高赔率')}</span></td>
+                                        <td class="font-semibold text-red-600">${formatMoney(bet.bet_amount)}</td>
+                                        <td class="font-semibold text-orange-600">${bet.odds || '-'}x</td>
+                                        <td>${formatBetDetail(bet.bet_detail)}</td>
+                                        <td class="text-sm text-gray-500">${formatDate(bet.created_at)}</td>
+                                        <td>
+                                            <button onclick="showBetDetail(${bet.bet_id})" class="btn-icon" title="详情">
+                                                <i class="fas fa-eye"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+// ==================== 代理业绩报表 ====================
+async function renderAgentPerformance() {
+    const content = document.getElementById('content');
+    const today = new Date().toISOString().split('T')[0];
+    const monthStart = today.slice(0, 8) + '01';
+    
+    try {
+        const data = await apiRequest(`/reports/agent-performance?start_date=${monthStart}&end_date=${today}`);
+        const list = data.data || [];
+        
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="text-lg font-semibold">
+                        <i class="fas fa-user-tie mr-2"></i>
+                        代理业绩报表
+                    </h3>
+                </div>
+                <div class="p-4">
+                    <div class="grid grid-cols-4 gap-4 mb-4">
+                        <div>
+                            <label class="block text-sm text-gray-600 mb-1">开始日期</label>
+                            <input type="date" id="agentStartDate" value="${monthStart}" class="form-input">
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-600 mb-1">结束日期</label>
+                            <input type="date" id="agentEndDate" value="${today}" class="form-input">
+                        </div>
+                        <div class="flex items-end">
+                            <button onclick="searchAgentPerformance()" class="btn btn-primary">
+                                <i class="fas fa-search mr-1"></i> 查询
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>代理账号</th>
+                                    <th>昵称</th>
+                                    <th>层级</th>
+                                    <th>玩家数</th>
+                                    <th>投注额</th>
+                                    <th>有效投注</th>
+                                    <th>输赢</th>
+                                    <th>公司利润</th>
+                                    <th>佣金</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${list.length === 0 ? '<tr><td colspan="9" class="text-center py-4 text-gray-500">暂无数据</td></tr>' : 
+                                list.map(agent => `
+                                    <tr class="hover:bg-gray-50">
+                                        <td class="font-mono">${escapeHtml(agent.agent_username || '')}</td>
+                                        <td>${escapeHtml(agent.nickname || '')}</td>
+                                        <td>${getLevelBadge(agent.level)}</td>
+                                        <td>${agent.player_count || 0}</td>
+                                        <td>${formatMoney(agent.total_bet)}</td>
+                                        <td>${formatMoney(agent.valid_bet)}</td>
+                                        <td class="${parseFloat(agent.total_win_loss) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(agent.total_win_loss)}</td>
+                                        <td class="${parseFloat(agent.company_profit) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(agent.company_profit)}</td>
+                                        <td class="text-blue-600">${formatMoney(agent.commission_earned)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+async function searchAgentPerformance() {
+    const startDate = document.getElementById('agentStartDate').value;
+    const endDate = document.getElementById('agentEndDate').value;
+    
+    try {
+        const data = await apiRequest(`/reports/agent-performance?start_date=${startDate}&end_date=${endDate}`);
+        // 重新渲染表格...
+        renderAgentPerformance();
+    } catch (error) {
+        alert('查询失败: ' + error.message);
+    }
+}
+
+// ==================== 角色权限管理 ====================
+async function renderRoles() {
+    const content = document.getElementById('content');
+    try {
+        const [rolesData, permsData] = await Promise.all([
+            apiRequest('/admin/roles'),
+            apiRequest('/admin/permissions')
+        ]);
+        const roles = rolesData.data || [];
+        const permissions = permsData.data || [];
+        
+        content.innerHTML = `
+            <div class="grid grid-cols-2 gap-6">
+                <!-- 角色列表 -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="text-lg font-semibold">
+                            <i class="fas fa-user-shield mr-2"></i>
+                            角色管理
+                        </h3>
+                        <button onclick="showCreateRoleModal()" class="btn btn-primary text-sm">
+                            <i class="fas fa-plus mr-1"></i> 新增角色
+                        </button>
+                    </div>
+                    <div class="p-4">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>角色名称</th>
+                                    <th>描述</th>
+                                    <th>用户数</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${roles.map(role => `
+                                    <tr class="hover:bg-gray-50">
+                                        <td class="font-semibold">${escapeHtml(role.role_name || '')}</td>
+                                        <td class="text-sm text-gray-600">${escapeHtml(role.description || '')}</td>
+                                        <td><span class="badge badge-info">${role.user_count || 0}</span></td>
+                                        <td>
+                                            <button onclick="editRole(${role.role_id})" class="btn-icon" title="编辑">
+                                                <i class="fas fa-edit"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- 权限列表 -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="text-lg font-semibold">
+                            <i class="fas fa-key mr-2"></i>
+                            权限列表 (${permissions.length})
+                        </h3>
+                    </div>
+                    <div class="p-4 max-h-96 overflow-y-auto">
+                        ${groupPermissions(permissions)}
+                    </div>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+function groupPermissions(permissions) {
+    const groups = {};
+    permissions.forEach(p => {
+        const module = p.module || 'other';
+        if (!groups[module]) groups[module] = [];
+        groups[module].push(p);
+    });
+    
+    return Object.entries(groups).map(([module, perms]) => `
+        <div class="mb-4">
+            <h4 class="font-semibold text-gray-700 mb-2 capitalize">${escapeHtml(module)}</h4>
+            <div class="flex flex-wrap gap-2">
+                ${perms.map(p => `
+                    <span class="px-2 py-1 bg-gray-100 text-gray-700 text-sm rounded" title="${escapeHtml(p.permission_code || '')}">
+                        ${escapeHtml(p.permission_name || '')}
+                    </span>
+                `).join('')}
+            </div>
+        </div>
+    `).join('');
+}
+
+function showCreateRoleModal() {
+    openModal(`
+        <div class="p-4">
+            <h3 class="text-lg font-semibold mb-4">新增角色</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">角色名称</label>
+                    <input type="text" id="newRoleName" class="form-input" placeholder="请输入角色名称">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">描述</label>
+                    <textarea id="newRoleDesc" class="form-input" rows="3" placeholder="请输入角色描述"></textarea>
+                </div>
+                <div class="flex justify-end gap-2">
+                    <button onclick="closeModal()" class="btn btn-secondary">取消</button>
+                    <button onclick="createRole()" class="btn btn-primary">创建</button>
+                </div>
+            </div>
+        </div>
+    `);
+}
+
+async function createRole() {
+    const name = document.getElementById('newRoleName').value;
+    const desc = document.getElementById('newRoleDesc').value;
+    
+    if (!name) {
+        alert('请输入角色名称');
+        return;
+    }
+    
+    try {
+        await apiRequest('/admin/roles', {
+            method: 'POST',
+            body: JSON.stringify({ role_name: name, description: desc, permissions: [] })
+        });
+        closeModal();
+        alert('创建成功');
+        renderRoles();
+    } catch (error) {
+        alert('创建失败: ' + error.message);
+    }
+}
+
+function editRole(roleId) {
+    alert('编辑角色功能: ' + roleId);
+}
+
+// ==================== 登录日志 ====================
+async function renderLoginLogs() {
+    const content = document.getElementById('content');
+    try {
+        // 使用用户登录日志API或从审计日志中筛选
+        const data = await apiRequest('/admin/audit-logs?size=100');
+        const allLogs = data.data?.list || [];
+        // 筛选登录相关操作
+        const loginLogs = allLogs.filter(log => log.operation_type === 'LOGIN');
+        
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="text-lg font-semibold">
+                        <i class="fas fa-sign-in-alt mr-2"></i>
+                        登录日志
+                    </h3>
+                    <button onclick="renderLoginLogs()" class="btn btn-primary text-sm">
+                        <i class="fas fa-sync-alt mr-1"></i> 刷新
+                    </button>
+                </div>
+                <div class="p-4">
+                    <div class="overflow-x-auto">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>管理员</th>
+                                    <th>登录IP</th>
+                                    <th>登录时间</th>
+                                    <th>状态</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${loginLogs.length === 0 ? '<tr><td colspan="4" class="text-center py-4 text-gray-500">暂无登录记录</td></tr>' : 
+                                loginLogs.map(log => `
+                                    <tr class="hover:bg-gray-50">
+                                        <td class="font-mono">${escapeHtml(log.admin_username || '')}</td>
+                                        <td class="font-mono text-sm">${escapeHtml(log.ip_address || '')}</td>
+                                        <td class="text-sm text-gray-500">${formatDate(log.created_at)}</td>
+                                        <td><span class="badge badge-success">成功</span></td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+// ==================== 注单详情 ====================
+async function showBetDetail(betId) {
+    try {
+        const data = await apiRequest(`/bets/${betId}`);
+        const bet = data.data;
+        
+        if (!bet) {
+            alert('注单不存在');
+            return;
+        }
+        
+        openModal(`
+            <div class="p-4 max-w-lg">
+                <h3 class="text-lg font-semibold mb-4">
+                    <i class="fas fa-receipt mr-2"></i>
+                    注单详情
+                </h3>
+                <div class="space-y-3">
+                    <div class="flex justify-between border-b pb-2">
+                        <span class="text-gray-600">注单号:</span>
+                        <span class="font-mono">${escapeHtml(bet.bet_no || '')}</span>
+                    </div>
+                    <div class="flex justify-between border-b pb-2">
+                        <span class="text-gray-600">会员账号:</span>
+                        <span>${escapeHtml(bet.username || '')}</span>
+                    </div>
+                    <div class="flex justify-between border-b pb-2">
+                        <span class="text-gray-600">游戏类型:</span>
+                        <span class="badge badge-info">${escapeHtml(bet.game_type || '')}</span>
+                    </div>
+                    <div class="flex justify-between border-b pb-2">
+                        <span class="text-gray-600">桌台/局号:</span>
+                        <span>${escapeHtml(bet.table_no || '')} / ${escapeHtml(bet.round_no || '')}</span>
+                    </div>
+                    <div class="flex justify-between border-b pb-2">
+                        <span class="text-gray-600">下注金额:</span>
+                        <span class="font-semibold text-blue-600">${formatMoney(bet.bet_amount)}</span>
+                    </div>
+                    <div class="flex justify-between border-b pb-2">
+                        <span class="text-gray-600">有效投注:</span>
+                        <span>${formatMoney(bet.valid_bet)}</span>
+                    </div>
+                    <div class="flex justify-between border-b pb-2">
+                        <span class="text-gray-600">输赢:</span>
+                        <span class="${parseFloat(bet.win_loss) >= 0 ? 'text-green-600' : 'text-red-600'} font-semibold">${formatMoney(bet.win_loss)}</span>
+                    </div>
+                    <div class="flex justify-between border-b pb-2">
+                        <span class="text-gray-600">状态:</span>
+                        <span>${getBetStatusBadge(bet.status)}</span>
+                    </div>
+                    <div class="flex justify-between border-b pb-2">
+                        <span class="text-gray-600">下注时间:</span>
+                        <span class="text-sm">${formatDate(bet.created_at)}</span>
+                    </div>
+                    <div class="border-b pb-2">
+                        <span class="text-gray-600">下注内容:</span>
+                        <pre class="mt-1 p-2 bg-gray-50 rounded text-sm overflow-x-auto">${escapeHtml(bet.bet_detail || '-')}</pre>
+                    </div>
+                </div>
+                
+                ${bet.status === 1 ? `
+                <div class="mt-4 pt-4 border-t flex justify-end gap-2">
+                    <button onclick="closeModal()" class="btn btn-secondary">关闭</button>
+                    <button onclick="voidBet(${bet.bet_id})" class="btn btn-danger">
+                        <i class="fas fa-ban mr-1"></i> 作废注单
+                    </button>
+                </div>
+                ` : `
+                <div class="mt-4 pt-4 border-t flex justify-end">
+                    <button onclick="closeModal()" class="btn btn-secondary">关闭</button>
+                </div>
+                `}
+            </div>
+        `);
+    } catch (error) {
+        alert('加载失败: ' + error.message);
+    }
+}
+
+async function voidBet(betId) {
+    const reason = prompt('请输入作废原因:');
+    if (!reason) return;
+    
+    const secondaryPwd = prompt('请输入二次密码进行确认:');
+    if (!secondaryPwd) return;
+    
+    try {
+        await apiRequest(`/bets/${betId}/void`, {
+            method: 'POST',
+            body: JSON.stringify({ reason, secondary_password: secondaryPwd })
+        });
+        closeModal();
+        alert('注单已作废');
+        loadPage(currentPage);
+    } catch (error) {
+        alert('作废失败: ' + error.message);
+    }
+}
+
+function getBetStatusBadge(status) {
+    switch (parseInt(status)) {
+        case 0: return '<span class="badge badge-warning">待结算</span>';
+        case 1: return '<span class="badge badge-success">已结算</span>';
+        case 2: return '<span class="badge badge-danger">已作废</span>';
+        default: return '<span class="badge badge-info">未知</span>';
     }
 }
 
