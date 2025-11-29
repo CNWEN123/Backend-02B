@@ -4,49 +4,252 @@ import { serveStatic } from 'hono/cloudflare-pages'
 
 type Bindings = {
   DB: D1Database
+  JWT_SECRET?: string
 }
 
-const app = new Hono<{ Bindings: Bindings }>()
+type Variables = {
+  admin: {
+    admin_id: number
+    username: string
+    role_id: number
+  } | null
+}
 
-// CORS配置
-app.use('/api/*', cors())
+const app = new Hono<{ Bindings: Bindings; Variables: Variables }>()
+
+// ==================== 安全配置 ====================
+
+// JWT密钥 - 生产环境应从环境变量获取
+const getJWTSecret = (c: any) => c.env.JWT_SECRET || 'live-dealer-admin-secret-key-2024'
+
+// CORS配置 - 限制允许的来源
+app.use('/api/*', cors({
+  origin: (origin) => {
+    // 允许的域名列表
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'https://localhost:3000',
+      /\.pages\.dev$/,
+      /\.workers\.dev$/
+    ]
+    if (!origin) return null
+    for (const allowed of allowedOrigins) {
+      if (typeof allowed === 'string' && origin === allowed) return origin
+      if (allowed instanceof RegExp && allowed.test(origin)) return origin
+    }
+    return null
+  },
+  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+  maxAge: 86400
+}))
 
 // 静态文件
 app.use('/static/*', serveStatic())
+
+// ==================== 安全工具函数 ====================
+
+// 生成安全Token (HMAC-SHA256)
+async function generateToken(payload: object, secret: string): Promise<string> {
+  const header = { alg: 'HS256', typ: 'JWT' }
+  const encodedHeader = btoa(JSON.stringify(header)).replace(/=/g, '')
+  const encodedPayload = btoa(JSON.stringify(payload)).replace(/=/g, '')
+  const data = `${encodedHeader}.${encodedPayload}`
+  
+  const encoder = new TextEncoder()
+  const keyData = encoder.encode(secret)
+  const key = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(data))
+  const encodedSignature = btoa(String.fromCharCode(...new Uint8Array(signature))).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
+  
+  return `${data}.${encodedSignature}`
+}
+
+// 验证Token
+async function verifyToken(token: string, secret: string): Promise<any | null> {
+  try {
+    const parts = token.split('.')
+    if (parts.length !== 3) return null
+    
+    const [encodedHeader, encodedPayload, encodedSignature] = parts
+    const data = `${encodedHeader}.${encodedPayload}`
+    
+    const encoder = new TextEncoder()
+    const keyData = encoder.encode(secret)
+    const key = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['verify'])
+    
+    const signatureStr = atob(encodedSignature.replace(/-/g, '+').replace(/_/g, '/'))
+    const signatureBytes = new Uint8Array([...signatureStr].map(c => c.charCodeAt(0)))
+    
+    const isValid = await crypto.subtle.verify('HMAC', key, signatureBytes, encoder.encode(data))
+    if (!isValid) return null
+    
+    const payload = JSON.parse(atob(encodedPayload))
+    if (payload.exp && payload.exp < Date.now()) return null
+    
+    return payload
+  } catch {
+    return null
+  }
+}
+
+// 密码哈希 (使用SHA-256)
+async function hashPassword(password: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const data = encoder.encode(password)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+  const hashArray = new Uint8Array(hashBuffer)
+  return Array.from(hashArray).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+// 安全比较 (防止时序攻击)
+function secureCompare(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let result = 0
+  for (let i = 0; i < a.length; i++) {
+    result |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  }
+  return result === 0
+}
+
+// 输入验证 - 分页参数
+function validatePagination(page: string | undefined, size: string | undefined): { page: number; size: number } {
+  const p = Math.max(1, Math.min(1000, parseInt(page || '1') || 1))
+  const s = Math.max(1, Math.min(100, parseInt(size || '20') || 20))
+  return { page: p, size: s }
+}
+
+// 输入验证 - 整数ID
+function validateId(id: string | undefined): number | null {
+  if (!id) return null
+  const num = parseInt(id)
+  if (isNaN(num) || num < 1 || num > 2147483647) return null
+  return num
+}
+
+// 获取客户端IP
+function getClientIP(c: any): string {
+  return c.req.header('CF-Connecting-IP') || 
+         c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() || 
+         '127.0.0.1'
+}
+
+// ==================== 认证中间件 ====================
+
+const authMiddleware = async (c: any, next: any) => {
+  const token = c.req.header('Authorization')?.replace('Bearer ', '')
+  
+  if (!token) {
+    return c.json({ success: false, message: '未授权访问' }, 401)
+  }
+  
+  const payload = await verifyToken(token, getJWTSecret(c))
+  if (!payload) {
+    return c.json({ success: false, message: 'Token无效或已过期' }, 401)
+  }
+  
+  // 验证用户是否仍然有效
+  const admin = await c.env.DB.prepare(
+    'SELECT admin_id, username, role_id, status FROM admin_users WHERE admin_id = ? AND status = 1'
+  ).bind(payload.admin_id).first()
+  
+  if (!admin) {
+    return c.json({ success: false, message: '账号已被禁用' }, 401)
+  }
+  
+  c.set('admin', {
+    admin_id: admin.admin_id,
+    username: admin.username,
+    role_id: admin.role_id
+  })
+  
+  await next()
+}
+
+// 对需要认证的API路由应用中间件
+app.use('/api/v1/dashboard/*', authMiddleware)
+app.use('/api/v1/players/*', authMiddleware)
+app.use('/api/v1/agents/*', authMiddleware)
+app.use('/api/v1/finance/*', authMiddleware)
+app.use('/api/v1/bets/*', authMiddleware)
+app.use('/api/v1/commission/*', authMiddleware)
+app.use('/api/v1/risk/*', authMiddleware)
+app.use('/api/v1/reports/*', authMiddleware)
+app.use('/api/v1/dealers/*', authMiddleware)
+app.use('/api/v1/tables/*', authMiddleware)
+app.use('/api/v1/shifts/*', authMiddleware)
+app.use('/api/v1/admin/*', authMiddleware)
+app.use('/api/v1/announcements/*', authMiddleware)
 
 // ==================== 认证API ====================
 
 // 登录
 app.post('/api/v1/auth/login', async (c) => {
-  const { username, password, captcha } = await c.req.json()
-  
-  if (!captcha || captcha.length < 4) {
-    return c.json({ success: false, message: '验证码错误' }, 400)
-  }
-
   try {
+    const { username, password, captcha } = await c.req.json()
+    const clientIP = getClientIP(c)
+    
+    // 输入验证
+    if (!username || typeof username !== 'string' || username.length < 2 || username.length > 50) {
+      return c.json({ success: false, message: '用户名格式错误' }, 400)
+    }
+    if (!password || typeof password !== 'string' || password.length < 4) {
+      return c.json({ success: false, message: '密码格式错误' }, 400)
+    }
+    if (!captcha || typeof captcha !== 'string' || captcha.length !== 4) {
+      return c.json({ success: false, message: '验证码错误' }, 400)
+    }
+
+    // 查询用户（不返回敏感字段）
     const admin = await c.env.DB.prepare(
-      'SELECT * FROM admin_users WHERE username = ? AND status = 1'
-    ).bind(username).first()
+      'SELECT admin_id, username, nickname, password_hash, role_id, two_fa_enabled, status FROM admin_users WHERE username = ?'
+    ).bind(username.trim()).first()
 
     if (!admin) {
+      // 记录失败登录尝试
+      await c.env.DB.prepare(
+        'INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, new_value, ip_address) VALUES (?, ?, ?, ?, ?, ?)'
+      ).bind(0, username, 'LOGIN_FAILED', 'admin_users', '用户不存在', clientIP).run()
+      return c.json({ success: false, message: '用户名或密码错误' }, 401)
+    }
+    
+    if (admin.status !== 1) {
+      return c.json({ success: false, message: '账号已被禁用' }, 401)
+    }
+
+    // 验证密码 (SHA-256哈希比较)
+    const passwordHash = await hashPassword(password)
+    // 兼容处理：如果数据库中是明文密码或旧格式，也尝试匹配
+    const passwordValid = secureCompare(passwordHash, admin.password_hash as string) || 
+                          secureCompare(password, admin.password_hash as string)
+    
+    if (!passwordValid) {
+      await c.env.DB.prepare(
+        'INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, new_value, ip_address) VALUES (?, ?, ?, ?, ?, ?)'
+      ).bind(admin.admin_id, admin.username, 'LOGIN_FAILED', 'admin_users', '密码错误', clientIP).run()
       return c.json({ success: false, message: '用户名或密码错误' }, 401)
     }
 
-    const token = btoa(JSON.stringify({ 
+    // 生成安全Token
+    const tokenPayload = { 
       admin_id: admin.admin_id, 
       username: admin.username,
       role_id: admin.role_id,
-      exp: Date.now() + 24 * 60 * 60 * 1000 
-    }))
+      iat: Date.now(),
+      exp: Date.now() + 8 * 60 * 60 * 1000 // 8小时过期
+    }
+    const token = await generateToken(tokenPayload, getJWTSecret(c))
 
+    // 更新登录信息
     await c.env.DB.prepare(
       'UPDATE admin_users SET last_login_at = CURRENT_TIMESTAMP, last_login_ip = ? WHERE admin_id = ?'
-    ).bind(c.req.header('CF-Connecting-IP') || '127.0.0.1', admin.admin_id).run()
+    ).bind(clientIP, admin.admin_id).run()
 
+    // 记录成功登录
     await c.env.DB.prepare(
       'INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, target_id, new_value, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).bind(admin.admin_id, admin.username, 'LOGIN', 'admin_users', admin.admin_id, '登录成功', c.req.header('CF-Connecting-IP') || '127.0.0.1').run()
+    ).bind(admin.admin_id, admin.username, 'LOGIN', 'admin_users', admin.admin_id, '登录成功', clientIP).run()
 
     return c.json({ 
       success: true, 
@@ -73,17 +276,21 @@ app.get('/api/v1/auth/me', async (c) => {
   }
 
   try {
-    const payload = JSON.parse(atob(token))
-    if (payload.exp < Date.now()) {
-      return c.json({ success: false, message: 'Token已过期' }, 401)
+    const payload = await verifyToken(token, getJWTSecret(c))
+    if (!payload) {
+      return c.json({ success: false, message: 'Token无效或已过期' }, 401)
     }
 
     const admin = await c.env.DB.prepare(
-      'SELECT a.*, r.role_name, r.permissions FROM admin_users a JOIN admin_roles r ON a.role_id = r.role_id WHERE a.admin_id = ?'
+      `SELECT a.admin_id, a.username, a.nickname, a.role_id, a.status,
+              a.last_login_ip, a.last_login_at, r.role_name, r.permissions 
+       FROM admin_users a 
+       JOIN admin_roles r ON a.role_id = r.role_id 
+       WHERE a.admin_id = ? AND a.status = 1`
     ).bind(payload.admin_id).first()
 
     if (!admin) {
-      return c.json({ success: false, message: '用户不存在' }, 404)
+      return c.json({ success: false, message: '用户不存在或已被禁用' }, 404)
     }
 
     return c.json({ 
@@ -260,8 +467,7 @@ app.get('/api/v1/dashboard/game-distribution', async (c) => {
 // ==================== 玩家管理API ====================
 
 app.get('/api/v1/players', async (c) => {
-  const page = parseInt(c.req.query('page') || '1')
-  const size = parseInt(c.req.query('size') || '20')
+  const { page, size } = validatePagination(c.req.query('page'), c.req.query('size'))
   const username = c.req.query('username')
   const nickname = c.req.query('nickname')
   const status = c.req.query('status')
@@ -414,18 +620,29 @@ app.put('/api/v1/players/:user_id', async (c) => {
 
 // 更新玩家状态
 app.put('/api/v1/players/:user_id/status', async (c) => {
-  const user_id = c.req.param('user_id')
+  const user_id = validateId(c.req.param('user_id'))
+  if (!user_id) {
+    return c.json({ success: false, message: '无效的用户ID' }, 400)
+  }
+  
+  const admin = c.get('admin')
   const { status, reason } = await c.req.json()
+  const clientIP = getClientIP(c)
+  
+  // 验证status值
+  if (![0, 1, 2].includes(status)) {
+    return c.json({ success: false, message: '无效的状态值' }, 400)
+  }
 
   try {
     await c.env.DB.prepare(
       'UPDATE users SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?'
     ).bind(status, user_id).run()
 
-    // 记录日志
+    // 记录日志 - 使用真实管理员信息
     await c.env.DB.prepare(
       'INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, target_id, new_value, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).bind(1, 'system', status === 0 ? 'FREEZE_PLAYER' : 'UNFREEZE_PLAYER', 'users', user_id, reason || '', '127.0.0.1').run()
+    ).bind(admin.admin_id, admin.username, status === 0 ? 'FREEZE_PLAYER' : 'UNFREEZE_PLAYER', 'users', user_id, reason || '', clientIP).run()
 
     return c.json({ success: true, message: '状态更新成功' })
   } catch (error) {
@@ -435,14 +652,20 @@ app.put('/api/v1/players/:user_id/status', async (c) => {
 
 // 踢线玩家
 app.post('/api/v1/players/:user_id/kick', async (c) => {
-  const user_id = c.req.param('user_id')
+  const user_id = validateId(c.req.param('user_id'))
+  if (!user_id) {
+    return c.json({ success: false, message: '无效的用户ID' }, 400)
+  }
+  
+  const admin = c.get('admin')
   const { reason } = await c.req.json()
+  const clientIP = getClientIP(c)
 
   try {
     // 记录操作日志
     await c.env.DB.prepare(
       'INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, target_id, new_value, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).bind(1, 'system', 'KICK_PLAYER', 'users', user_id, reason || '管理员踢线', '127.0.0.1').run()
+    ).bind(admin.admin_id, admin.username, 'KICK_PLAYER', 'users', user_id, reason || '管理员踢线', clientIP).run()
 
     return c.json({ success: true, message: '踢线成功' })
   } catch (error) {
@@ -452,20 +675,30 @@ app.post('/api/v1/players/:user_id/kick', async (c) => {
 
 // 更换代理
 app.post('/api/v1/players/:user_id/transfer', async (c) => {
-  const user_id = c.req.param('user_id')
+  const user_id = validateId(c.req.param('user_id'))
+  if (!user_id) {
+    return c.json({ success: false, message: '无效的用户ID' }, 400)
+  }
+  
+  const admin = c.get('admin')
   const { to_agent_id, reason } = await c.req.json()
+  
+  const targetAgentId = validateId(String(to_agent_id))
+  if (!targetAgentId) {
+    return c.json({ success: false, message: '无效的目标代理ID' }, 400)
+  }
 
   try {
     const user = await c.env.DB.prepare('SELECT agent_id FROM users WHERE user_id = ?').bind(user_id).first()
     
     await c.env.DB.prepare(
       'UPDATE users SET agent_id = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?'
-    ).bind(to_agent_id, user_id).run()
+    ).bind(targetAgentId, user_id).run()
 
-    // 记录转移日志
+    // 记录转移日志 - 使用真实管理员ID
     await c.env.DB.prepare(
       'INSERT INTO player_transfer_logs (user_id, from_agent_id, to_agent_id, reason, operator_id) VALUES (?, ?, ?, ?, ?)'
-    ).bind(user_id, user?.agent_id, to_agent_id, reason || '', 1).run()
+    ).bind(user_id, user?.agent_id, targetAgentId, reason || '', admin.admin_id).run()
 
     return c.json({ success: true, message: '转移成功' })
   } catch (error) {
@@ -618,8 +851,7 @@ app.get('/api/v1/players/stats/ltv', async (c) => {
 // ==================== 代理管理API ====================
 
 app.get('/api/v1/agents', async (c) => {
-  const page = parseInt(c.req.query('page') || '1')
-  const size = parseInt(c.req.query('size') || '20')
+  const { page, size } = validatePagination(c.req.query('page'), c.req.query('size'))
   const parent_id = c.req.query('parent_id')
   const level = c.req.query('level')
   const status = c.req.query('status')
@@ -797,8 +1029,7 @@ app.get('/api/v1/agents/tree', async (c) => {
 // ==================== 财务管理API ====================
 
 app.get('/api/v1/finance/transactions', async (c) => {
-  const page = parseInt(c.req.query('page') || '1')
-  const size = parseInt(c.req.query('size') || '20')
+  const { page, size } = validatePagination(c.req.query('page'), c.req.query('size'))
   const type = c.req.query('type')
   const status = c.req.query('status')
   const user_id = c.req.query('user_id')
@@ -877,22 +1108,37 @@ app.get('/api/v1/finance/transactions', async (c) => {
 
 // 存款/提款审核
 app.post('/api/v1/finance/transactions/:id/audit', async (c) => {
-  const id = c.req.param('id')
+  const id = validateId(c.req.param('id'))
+  if (!id) {
+    return c.json({ success: false, message: '无效的交易ID' }, 400)
+  }
+  
+  const admin = c.get('admin')
   const { action, remark } = await c.req.json()
+  const clientIP = getClientIP(c)
+  
+  // 验证action
+  if (!['approve', 'reject'].includes(action)) {
+    return c.json({ success: false, message: '无效的操作' }, 400)
+  }
   
   try {
     const tx = await c.env.DB.prepare('SELECT * FROM transactions WHERE transaction_id = ?').bind(id).first()
     if (!tx) {
       return c.json({ success: false, message: '交易不存在' }, 404)
     }
+    
+    if (tx.audit_status !== 0) {
+      return c.json({ success: false, message: '该交易已被审核' }, 400)
+    }
 
     const newStatus = action === 'approve' ? 1 : 2
     
     await c.env.DB.prepare(`
       UPDATE transactions 
-      SET audit_status = ?, audit_remark = ?, audit_at = CURRENT_TIMESTAMP, auditor_id = 1
+      SET audit_status = ?, audit_remark = ?, audit_at = CURRENT_TIMESTAMP, auditor_id = ?
       WHERE transaction_id = ?
-    `).bind(newStatus, remark || '', id).run()
+    `).bind(newStatus, remark || '', admin.admin_id, id).run()
 
     // 如果是通过，更新用户余额
     if (action === 'approve') {
@@ -906,10 +1152,10 @@ app.post('/api/v1/finance/transactions/:id/audit', async (c) => {
       `).bind(tx.amount, tx.amount, tx.amount, tx.amount, tx.amount, tx.user_id).run()
     }
 
-    // 记录审计日志
+    // 记录审计日志 - 使用真实管理员信息
     await c.env.DB.prepare(
-      'INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, target_id, new_value, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).bind(1, 'admin', action === 'approve' ? 'APPROVE_TX' : 'REJECT_TX', 'transactions', id, remark || '', '127.0.0.1').run()
+      'INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, target_id, old_value, new_value, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).bind(admin.admin_id, admin.username, action === 'approve' ? 'APPROVE_TX' : 'REJECT_TX', 'transactions', id, JSON.stringify({amount: tx.amount, user_id: tx.user_id}), remark || '', clientIP).run()
 
     return c.json({ success: true, message: '审核完成' })
   } catch (error) {
@@ -956,10 +1202,24 @@ app.get('/api/v1/finance/withdrawals', async (c) => {
 
 // 人工存取款
 app.post('/api/v1/finance/manual-adjustment', async (c) => {
+  const admin = c.get('admin')
   const { user_id, amount, type, remark } = await c.req.json()
+  const clientIP = getClientIP(c)
+  
+  // 输入验证
+  const targetUserId = validateId(String(user_id))
+  if (!targetUserId) {
+    return c.json({ success: false, message: '无效的用户ID' }, 400)
+  }
+  if (typeof amount !== 'number' || isNaN(amount) || amount <= 0 || amount > 10000000) {
+    return c.json({ success: false, message: '无效的金额' }, 400)
+  }
+  if (!['deposit', 'withdraw'].includes(type)) {
+    return c.json({ success: false, message: '无效的操作类型' }, 400)
+  }
 
   try {
-    const user = await c.env.DB.prepare('SELECT balance FROM users WHERE user_id = ?').bind(user_id).first()
+    const user = await c.env.DB.prepare('SELECT balance FROM users WHERE user_id = ?').bind(targetUserId).first()
     if (!user) {
       return c.json({ success: false, message: '用户不存在' }, 404)
     }
@@ -971,23 +1231,25 @@ app.post('/api/v1/finance/manual-adjustment', async (c) => {
       return c.json({ success: false, message: '余额不足' }, 400)
     }
 
-    // 生成订单号
-    const orderNo = `MAN${Date.now()}${Math.random().toString(36).substr(2, 6).toUpperCase()}`
+    // 生成安全订单号
+    const randomBytes = crypto.getRandomValues(new Uint8Array(4))
+    const randomStr = Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase()
+    const orderNo = `MAN${Date.now()}${randomStr}`
 
     // 创建交易记录
     await c.env.DB.prepare(`
-      INSERT INTO transactions (order_no, user_id, transaction_type, amount, balance_before, balance_after, audit_status, remark)
-      VALUES (?, ?, 7, ?, ?, ?, 1, ?)
-    `).bind(orderNo, user_id, adjustAmount, user.balance, newBalance, remark || '人工调整').run()
+      INSERT INTO transactions (order_no, user_id, transaction_type, amount, balance_before, balance_after, audit_status, auditor_id, remark)
+      VALUES (?, ?, 7, ?, ?, ?, 1, ?, ?)
+    `).bind(orderNo, targetUserId, adjustAmount, user.balance, newBalance, admin.admin_id, remark || '人工调整').run()
 
     // 更新用户余额
     await c.env.DB.prepare('UPDATE users SET balance = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?')
-      .bind(newBalance, user_id).run()
+      .bind(newBalance, targetUserId).run()
 
-    // 记录审计日志
+    // 记录审计日志 - 使用真实管理员信息
     await c.env.DB.prepare(
       'INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, target_id, old_value, new_value, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).bind(1, 'admin', 'MANUAL_ADJUST', 'users', user_id, String(user.balance), String(newBalance), '127.0.0.1').run()
+    ).bind(admin.admin_id, admin.username, 'MANUAL_ADJUST', 'users', targetUserId, String(user.balance), String(newBalance), clientIP).run()
 
     return c.json({ success: true, message: '调整成功', data: { order_no: orderNo } })
   } catch (error) {
@@ -1041,8 +1303,7 @@ app.get('/api/v1/finance/deposit-supplements', async (c) => {
 // ==================== 注单管理API ====================
 
 app.get('/api/v1/bets', async (c) => {
-  const page = parseInt(c.req.query('page') || '1')
-  const size = parseInt(c.req.query('size') || '20')
+  const { page, size } = validatePagination(c.req.query('page'), c.req.query('size'))
   const game_type = c.req.query('game_type')
   const status = c.req.query('status')
   const user_id = c.req.query('user_id')
@@ -1151,18 +1412,42 @@ app.get('/api/v1/bets/:bet_id', async (c) => {
 
 // 废除注单
 app.post('/api/v1/bets/:bet_id/void', async (c) => {
-  const bet_id = c.req.param('bet_id')
+  const bet_id = validateId(c.req.param('bet_id'))
+  if (!bet_id) {
+    return c.json({ success: false, message: '无效的注单ID' }, 400)
+  }
+  
+  const admin = c.get('admin')
   const { reason, secondary_password } = await c.req.json()
+  const clientIP = getClientIP(c)
 
   try {
-    // 简单验证二次密码
-    if (secondary_password !== '123456') {
+    // 验证二次密码 - 从数据库获取管理员的二次密码进行验证
+    if (!secondary_password || typeof secondary_password !== 'string') {
+      return c.json({ success: false, message: '请输入二次密码' }, 400)
+    }
+    
+    const adminUser = await c.env.DB.prepare(
+      'SELECT secondary_password FROM admin_users WHERE admin_id = ?'
+    ).bind(admin.admin_id).first()
+    
+    // 如果管理员设置了二次密码，验证它；否则使用默认逻辑
+    const secondaryHash = await hashPassword(secondary_password)
+    const storedSecondary = adminUser?.secondary_password as string || await hashPassword('123456')
+    if (!secureCompare(secondaryHash, storedSecondary) && !secureCompare(secondary_password, storedSecondary)) {
+      await c.env.DB.prepare(
+        'INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, target_id, new_value, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      ).bind(admin.admin_id, admin.username, 'VOID_BET_FAILED', 'bets', bet_id, '二次密码错误', clientIP).run()
       return c.json({ success: false, message: '二次密码错误' }, 400)
     }
 
     const bet = await c.env.DB.prepare('SELECT * FROM bets WHERE bet_id = ?').bind(bet_id).first()
     if (!bet) {
       return c.json({ success: false, message: '注单不存在' }, 404)
+    }
+    
+    if (bet.bet_status === 3) {
+      return c.json({ success: false, message: '注单已被废除' }, 400)
     }
 
     // 更新注单状态
@@ -1175,10 +1460,10 @@ app.post('/api/v1/bets/:bet_id/void', async (c) => {
       'UPDATE users SET balance = balance + ? WHERE user_id = ?'
     ).bind(bet.bet_amount, bet.user_id).run()
 
-    // 记录审计日志
+    // 记录审计日志 - 使用真实的管理员信息
     await c.env.DB.prepare(
-      'INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, target_id, new_value, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).bind(1, 'admin', 'VOID_BET', 'bets', bet_id, reason || '', '127.0.0.1').run()
+      'INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, target_id, old_value, new_value, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).bind(admin.admin_id, admin.username, 'VOID_BET', 'bets', bet_id, JSON.stringify({bet_amount: bet.bet_amount, user_id: bet.user_id}), reason || '管理员废单', clientIP).run()
 
     return c.json({ success: true, message: '注单已废除' })
   } catch (error) {
@@ -1323,8 +1608,7 @@ app.put('/api/v1/commission/schemes/:scheme_id', async (c) => {
 
 // 洗码记录
 app.get('/api/v1/commission/records', async (c) => {
-  const page = parseInt(c.req.query('page') || '1')
-  const size = parseInt(c.req.query('size') || '20')
+  const { page, size } = validatePagination(c.req.query('page'), c.req.query('size'))
   const status = c.req.query('status')
   const user_id = c.req.query('user_id')
   const start_date = c.req.query('start_date')
@@ -1462,8 +1746,7 @@ app.post('/api/v1/commission/records/batch-audit', async (c) => {
 // ==================== 风控管理API ====================
 
 app.get('/api/v1/risk/alerts', async (c) => {
-  const page = parseInt(c.req.query('page') || '1')
-  const size = parseInt(c.req.query('size') || '20')
+  const { page, size } = validatePagination(c.req.query('page'), c.req.query('size'))
   const status = c.req.query('status')
   const risk_level = c.req.query('risk_level')
   const offset = (page - 1) * size
@@ -2166,8 +2449,7 @@ app.get('/api/v1/admin/permissions', async (c) => {
 
 // 审计日志
 app.get('/api/v1/admin/audit-logs', async (c) => {
-  const page = parseInt(c.req.query('page') || '1')
-  const size = parseInt(c.req.query('size') || '50')
+  const { page, size } = validatePagination(c.req.query('page'), c.req.query('size'))
   const admin_id = c.req.query('admin_id')
   const operation_type = c.req.query('operation_type')
   const start_date = c.req.query('start_date')
