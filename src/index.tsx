@@ -1605,27 +1605,137 @@ app.get('/api/v1/finance/turnover-audit/:user_id', async (c) => {
 
 // 获取红利配置列表
 app.get('/api/v1/bonus/configs', async (c) => {
+  const status = c.req.query('status')
+  const bonus_type = c.req.query('bonus_type')
+  
   try {
+    let where = 'WHERE 1=1'
+    const params: any[] = []
+    
+    if (status !== undefined && status !== '') {
+      where += ' AND bc.status = ?'
+      params.push(parseInt(status))
+    }
+    if (bonus_type) {
+      where += ' AND bc.bonus_type = ?'
+      params.push(bonus_type)
+    }
+    
     const result = await c.env.DB.prepare(`
-      SELECT bc.*, tr.rule_name as turnover_rule_name
+      SELECT bc.*, tr.rule_name as turnover_rule_name, tr.multiplier as turnover_multiplier
       FROM bonus_configs bc
       LEFT JOIN turnover_rules tr ON bc.turnover_rule_id = tr.rule_id
-      ORDER BY bc.config_id
-    `).all()
+      ${where}
+      ORDER BY bc.sort_order ASC, bc.config_id ASC
+    `).bind(...params).all()
+    
     return c.json({ success: true, data: result.results || [] })
   } catch (error) {
+    console.error('获取红利配置失败:', error)
     return c.json({ success: false, message: '获取红利配置失败' }, 500)
+  }
+})
+
+// 获取单个红利配置
+app.get('/api/v1/bonus/configs/:config_id', async (c) => {
+  const config_id = parseInt(c.req.param('config_id'))
+  
+  try {
+    const config = await c.env.DB.prepare(`
+      SELECT bc.*, tr.rule_name as turnover_rule_name, tr.multiplier as turnover_multiplier
+      FROM bonus_configs bc
+      LEFT JOIN turnover_rules tr ON bc.turnover_rule_id = tr.rule_id
+      WHERE bc.config_id = ?
+    `).bind(config_id).first()
+    
+    if (!config) {
+      return c.json({ success: false, message: '配置不存在' }, 404)
+    }
+    
+    return c.json({ success: true, data: config })
+  } catch (error) {
+    return c.json({ success: false, message: '获取配置详情失败' }, 500)
+  }
+})
+
+// 新增红利配置
+app.post('/api/v1/bonus/configs', async (c) => {
+  try {
+    const body = await c.req.json()
+    const bonus_type = body.bonus_type || ''
+    const bonus_name = body.bonus_name || ''
+    const description = body.description || ''
+    const min_deposit = body.min_deposit ?? 0
+    const max_bonus = body.max_bonus ?? 0
+    const bonus_percentage = body.bonus_percentage ?? 0
+    const turnover_rule_id = body.turnover_rule_id || null
+    const valid_days = body.valid_days ?? 30
+    const auto_send = body.auto_send ?? 0
+    const trigger_type = body.trigger_type || 'manual'
+    const trigger_amount = body.trigger_amount ?? 0
+    const vip_levels = body.vip_levels || ''
+    const daily_limit = body.daily_limit ?? 0
+    const total_limit = body.total_limit ?? 0
+    const sort_order = body.sort_order ?? 0
+    const status = body.status ?? 1
+    
+    if (!bonus_type || !bonus_name) {
+      return c.json({ success: false, message: '红利类型和名称不能为空' }, 400)
+    }
+    
+    const result = await c.env.DB.prepare(`
+      INSERT INTO bonus_configs (
+        bonus_type, bonus_name, description,
+        min_deposit, max_bonus, bonus_percentage,
+        turnover_rule_id, valid_days,
+        auto_send, trigger_type, trigger_amount,
+        vip_levels, daily_limit, total_limit,
+        sort_order, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      bonus_type, bonus_name, description,
+      min_deposit, max_bonus, bonus_percentage,
+      turnover_rule_id, valid_days,
+      auto_send, trigger_type, trigger_amount,
+      vip_levels, daily_limit, total_limit,
+      sort_order, status
+    ).run()
+    
+    return c.json({ 
+      success: true, 
+      message: '红利配置已创建', 
+      data: { config_id: result.meta.last_row_id }
+    })
+  } catch (error) {
+    console.error('创建红利配置失败:', error)
+    return c.json({ success: false, message: '创建红利配置失败' }, 500)
   }
 })
 
 // 更新红利配置
 app.put('/api/v1/bonus/configs/:config_id', async (c) => {
   const config_id = parseInt(c.req.param('config_id'))
-  const { bonus_name, description, min_deposit, max_bonus, bonus_percentage, turnover_rule_id, valid_days, status } = await c.req.json()
   
   try {
+    const body = await c.req.json()
+    const {
+      bonus_type, bonus_name, description,
+      min_deposit, max_bonus, bonus_percentage,
+      turnover_rule_id, valid_days,
+      auto_send, trigger_type, trigger_amount,
+      vip_levels, daily_limit, total_limit,
+      sort_order, status
+    } = body
+    
+    // 检查配置是否存在
+    const existing = await c.env.DB.prepare('SELECT config_id FROM bonus_configs WHERE config_id = ?').bind(config_id).first()
+    if (!existing) {
+      return c.json({ success: false, message: '配置不存在' }, 404)
+    }
+    
     await c.env.DB.prepare(`
       UPDATE bonus_configs SET 
+        bonus_type = COALESCE(?, bonus_type),
         bonus_name = COALESCE(?, bonus_name),
         description = COALESCE(?, description),
         min_deposit = COALESCE(?, min_deposit),
@@ -1633,14 +1743,176 @@ app.put('/api/v1/bonus/configs/:config_id', async (c) => {
         bonus_percentage = COALESCE(?, bonus_percentage),
         turnover_rule_id = ?,
         valid_days = COALESCE(?, valid_days),
+        auto_send = COALESCE(?, auto_send),
+        trigger_type = COALESCE(?, trigger_type),
+        trigger_amount = COALESCE(?, trigger_amount),
+        vip_levels = COALESCE(?, vip_levels),
+        daily_limit = COALESCE(?, daily_limit),
+        total_limit = COALESCE(?, total_limit),
+        sort_order = COALESCE(?, sort_order),
         status = COALESCE(?, status),
         updated_at = CURRENT_TIMESTAMP
       WHERE config_id = ?
-    `).bind(bonus_name, description, min_deposit, max_bonus, bonus_percentage, turnover_rule_id, valid_days, status, config_id).run()
+    `).bind(
+      bonus_type, bonus_name, description,
+      min_deposit, max_bonus, bonus_percentage,
+      turnover_rule_id, valid_days,
+      auto_send, trigger_type, trigger_amount,
+      vip_levels, daily_limit, total_limit,
+      sort_order, status,
+      config_id
+    ).run()
     
     return c.json({ success: true, message: '配置已更新' })
   } catch (error) {
+    console.error('更新红利配置失败:', error)
     return c.json({ success: false, message: '更新配置失败' }, 500)
+  }
+})
+
+// 删除红利配置
+app.delete('/api/v1/bonus/configs/:config_id', async (c) => {
+  const config_id = parseInt(c.req.param('config_id'))
+  
+  try {
+    // 检查是否有关联的红利记录
+    const hasRecords = await c.env.DB.prepare(`
+      SELECT COUNT(*) as count FROM bonus_records WHERE bonus_type = (
+        SELECT bonus_type FROM bonus_configs WHERE config_id = ?
+      )
+    `).bind(config_id).first()
+    
+    if (hasRecords && (hasRecords as any).count > 0) {
+      return c.json({ success: false, message: '该配置已有关联的红利记录，无法删除' }, 400)
+    }
+    
+    await c.env.DB.prepare('DELETE FROM bonus_configs WHERE config_id = ?').bind(config_id).run()
+    
+    return c.json({ success: true, message: '配置已删除' })
+  } catch (error) {
+    console.error('删除红利配置失败:', error)
+    return c.json({ success: false, message: '删除配置失败' }, 500)
+  }
+})
+
+// 批量更新红利配置状态
+app.put('/api/v1/bonus/configs/batch/status', async (c) => {
+  try {
+    const { config_ids, status } = await c.req.json()
+    
+    if (!config_ids || !Array.isArray(config_ids) || config_ids.length === 0) {
+      return c.json({ success: false, message: '请选择要更新的配置' }, 400)
+    }
+    
+    const placeholders = config_ids.map(() => '?').join(',')
+    await c.env.DB.prepare(`
+      UPDATE bonus_configs SET status = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE config_id IN (${placeholders})
+    `).bind(status, ...config_ids).run()
+    
+    return c.json({ success: true, message: `已更新${config_ids.length}个配置` })
+  } catch (error) {
+    return c.json({ success: false, message: '批量更新失败' }, 500)
+  }
+})
+
+// 自动派送红利 - 根据触发条件检查并派送
+app.post('/api/v1/bonus/auto-send', async (c) => {
+  try {
+    const { user_id, trigger_type, trigger_amount } = await c.req.json()
+    
+    if (!user_id || !trigger_type) {
+      return c.json({ success: false, message: '参数不完整' }, 400)
+    }
+    
+    // 获取用户信息
+    const user = await c.env.DB.prepare('SELECT * FROM users WHERE user_id = ?').bind(user_id).first()
+    if (!user) {
+      return c.json({ success: false, message: '用户不存在' }, 404)
+    }
+    
+    // 查找符合条件的自动派送配置
+    const configs = await c.env.DB.prepare(`
+      SELECT * FROM bonus_configs 
+      WHERE status = 1 AND auto_send = 1 AND trigger_type = ?
+      AND (trigger_amount = 0 OR trigger_amount <= ?)
+      AND (vip_levels = '' OR vip_levels LIKE ?)
+      ORDER BY bonus_percentage DESC
+    `).bind(trigger_type, trigger_amount || 0, `%${(user as any).vip_level || 0}%`).all()
+    
+    const sentBonuses: any[] = []
+    
+    for (const config of (configs.results || [])) {
+      // 检查每日和总量限制
+      if ((config as any).daily_limit > 0) {
+        const todayCount = await c.env.DB.prepare(`
+          SELECT COUNT(*) as count FROM bonus_records 
+          WHERE user_id = ? AND bonus_type = ? AND DATE(created_at) = DATE('now')
+        `).bind(user_id, (config as any).bonus_type).first()
+        
+        if ((todayCount as any)?.count >= (config as any).daily_limit) continue
+      }
+      
+      if ((config as any).total_limit > 0) {
+        const totalCount = await c.env.DB.prepare(`
+          SELECT COUNT(*) as count FROM bonus_records 
+          WHERE user_id = ? AND bonus_type = ?
+        `).bind(user_id, (config as any).bonus_type).first()
+        
+        if ((totalCount as any)?.count >= (config as any).total_limit) continue
+      }
+      
+      // 计算红利金额
+      let bonusAmount = (trigger_amount || 0) * ((config as any).bonus_percentage / 100)
+      if ((config as any).max_bonus > 0 && bonusAmount > (config as any).max_bonus) {
+        bonusAmount = (config as any).max_bonus
+      }
+      if (bonusAmount < (config as any).min_deposit) continue
+      
+      // 获取流水规则
+      let turnoverMultiplier = 1
+      if ((config as any).turnover_rule_id) {
+        const rule = await c.env.DB.prepare('SELECT multiplier FROM turnover_rules WHERE rule_id = ?')
+          .bind((config as any).turnover_rule_id).first()
+        if (rule) turnoverMultiplier = (rule as any).multiplier || 1
+      }
+      
+      const requiredTurnover = bonusAmount * turnoverMultiplier
+      const expiresAt = new Date(Date.now() + ((config as any).valid_days || 30) * 24 * 60 * 60 * 1000).toISOString()
+      
+      // 创建红利记录（自动审核通过）
+      const result = await c.env.DB.prepare(`
+        INSERT INTO bonus_records (
+          user_id, username, bonus_type, bonus_amount, 
+          turnover_rule_id, turnover_multiplier, required_turnover,
+          remark, admin_id, admin_username, audit_status, expires_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, '系统自动', 1, ?)
+      `).bind(
+        user_id, (user as any).username, (config as any).bonus_type, bonusAmount,
+        (config as any).turnover_rule_id, turnoverMultiplier, requiredTurnover,
+        `自动派送:${(config as any).bonus_name}`, expiresAt
+      ).run()
+      
+      // 更新用户余额
+      await c.env.DB.prepare('UPDATE users SET balance = balance + ? WHERE user_id = ?')
+        .bind(bonusAmount, user_id).run()
+      
+      sentBonuses.push({
+        bonus_id: result.meta.last_row_id,
+        bonus_type: (config as any).bonus_type,
+        bonus_name: (config as any).bonus_name,
+        bonus_amount: bonusAmount
+      })
+    }
+    
+    return c.json({ 
+      success: true, 
+      message: sentBonuses.length > 0 ? `已自动派送${sentBonuses.length}笔红利` : '无符合条件的红利',
+      data: sentBonuses
+    })
+  } catch (error) {
+    console.error('自动派送红利失败:', error)
+    return c.json({ success: false, message: '自动派送失败' }, 500)
   }
 })
 

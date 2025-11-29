@@ -96,7 +96,8 @@ const menuConfig = [
             { id: 'finance-withdrawals', title: '取款申请', page: 'finance-withdrawals' },
             { id: 'finance-turnover', title: '流水稽核', page: 'finance-turnover' },
             { id: 'finance-payment-methods', title: '收款方式', page: 'finance-payment-methods' },
-            { id: 'finance-bonus', title: '红利派送', page: 'finance-bonus', badge: 'NEW' }
+            { id: 'finance-bonus', title: '红利派送', page: 'finance-bonus' },
+            { id: 'finance-bonus-config', title: '红利配置', page: 'finance-bonus-config', badge: 'NEW' }
         ]
     },
     { 
@@ -328,6 +329,7 @@ function loadPage(page) {
         'finance-turnover': { title: '流水稽核', handler: renderTurnoverRules },
         'finance-payment-methods': { title: '收款方式', handler: renderPaymentMethods },
         'finance-bonus': { title: '红利派送', handler: renderBonusRecords },
+        'finance-bonus-config': { title: '红利配置', handler: renderBonusConfigs },
         'bets': { title: '注单列表', handler: renderBets },
         'bets-realtime': { title: '实时注单', handler: renderRealtimeBets },
         'bets-special': { title: '特殊注单', handler: renderSpecialBets },
@@ -1949,7 +1951,31 @@ async function viewBonusDetail(bonusId) {
     }
 }
 
-async function showBonusConfigs() {
+// ==================== 红利配置管理页面 ====================
+const bonusTypeOptions = {
+    'first_deposit': { label: '首存红利', color: 'green', icon: 'fa-gift' },
+    'deposit_bonus': { label: '存款红利', color: 'blue', icon: 'fa-coins' },
+    'activity': { label: '活动红利', color: 'purple', icon: 'fa-star' },
+    'rebate': { label: '返水红利', color: 'orange', icon: 'fa-undo' },
+    'birthday': { label: '生日红利', color: 'pink', icon: 'fa-birthday-cake' },
+    'vip_upgrade': { label: 'VIP晋级红利', color: 'yellow', icon: 'fa-crown' },
+    'weekly': { label: '每周红利', color: 'cyan', icon: 'fa-calendar-week' },
+    'monthly': { label: '每月红利', color: 'indigo', icon: 'fa-calendar-alt' },
+    'manual': { label: '人工红利', color: 'red', icon: 'fa-hand-paper' }
+};
+
+const triggerTypeOptions = {
+    'manual': { label: '手动派送', desc: '需管理员手动操作派送' },
+    'deposit': { label: '存款触发', desc: '玩家存款后自动派送' },
+    'register': { label: '注册触发', desc: '新玩家注册后自动派送' },
+    'login': { label: '登录触发', desc: '玩家登录时自动派送' },
+    'bet': { label: '投注触发', desc: '玩家投注后自动派送' },
+    'vip_upgrade': { label: 'VIP晋级触发', desc: 'VIP等级提升时自动派送' }
+};
+
+async function renderBonusConfigs() {
+    const content = document.getElementById('pageContent');
+    
     try {
         const [configsRes, rulesRes] = await Promise.all([
             apiRequest('/bonus/configs'),
@@ -1958,54 +1984,561 @@ async function showBonusConfigs() {
         
         const configs = configsRes.data || [];
         const rules = rulesRes.data || [];
+        window._turnoverRules = rules;
         
-        const bonusTypeMap = {
-            'first_deposit': { label: '首存红利', color: 'green' },
-            'deposit_bonus': { label: '存款红利', color: 'blue' },
-            'activity': { label: '活动红利', color: 'purple' },
-            'rebate': { label: '返水红利', color: 'orange' },
-            'manual': { label: '人工红利', color: 'red' }
-        };
+        // 统计数据
+        const activeCount = configs.filter(c => c.status === 1).length;
+        const autoSendCount = configs.filter(c => c.auto_send === 1).length;
         
-        openModal(`
-            <div class="card-header"><i class="fas fa-cog mr-2 text-gray-500"></i>红利配置管理</div>
-            <div class="p-6 max-h-[70vh] overflow-y-auto">
-                <div class="space-y-4">
-                    ${configs.map(c => {
-                        const typeInfo = bonusTypeMap[c.bonus_type] || { label: c.bonus_type, color: 'gray' };
-                        return `
-                            <div class="border rounded-lg p-4">
-                                <div class="flex items-center justify-between mb-3">
-                                    <div>
-                                        <span class="badge badge-${typeInfo.color}">${typeInfo.label}</span>
-                                        <span class="font-semibold ml-2">${escapeHtml(c.bonus_name)}</span>
-                                    </div>
-                                    <span class="${c.status === 1 ? 'text-green-500' : 'text-red-500'}">
-                                        <i class="fas fa-circle text-xs mr-1"></i>${c.status === 1 ? '启用' : '禁用'}
-                                    </span>
-                                </div>
-                                <div class="grid grid-cols-4 gap-4 text-sm">
-                                    <div><span class="text-gray-500">最低存款:</span> ¥${formatNumber(c.min_deposit)}</div>
-                                    <div><span class="text-gray-500">红利上限:</span> ¥${formatNumber(c.max_bonus)}</div>
-                                    <div><span class="text-gray-500">红利比例:</span> ${c.bonus_percentage}%</div>
-                                    <div><span class="text-gray-500">有效天数:</span> ${c.valid_days}天</div>
-                                </div>
-                                <div class="mt-2 text-sm text-gray-500">${escapeHtml(c.description || '无描述')}</div>
-                                <div class="mt-3 flex justify-end">
-                                    <button onclick="editBonusConfig(${c.config_id})" class="btn btn-outline text-sm"><i class="fas fa-edit mr-1"></i>编辑</button>
-                                </div>
-                            </div>
-                        `;
-                    }).join('')}
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header bg-gradient-to-r from-pink-500 to-rose-600 text-white">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-lg font-semibold"><i class="fas fa-cog mr-2"></i>红利配置管理</h3>
+                        <div class="flex space-x-2">
+                            <button onclick="showAddBonusConfig()" class="btn bg-white text-pink-600 hover:bg-pink-50 text-sm">
+                                <i class="fas fa-plus mr-1"></i>新增配置
+                            </button>
+                        </div>
+                    </div>
                 </div>
-                <div class="flex justify-end mt-6">
-                    <button onclick="closeModal()" class="btn btn-outline">关闭</button>
+                
+                <!-- 统计卡片 -->
+                <div class="grid grid-cols-4 gap-4 p-4 bg-gray-50 border-b">
+                    <div class="bg-white rounded-lg p-4 text-center shadow-sm">
+                        <div class="text-2xl font-bold text-blue-600">${configs.length}</div>
+                        <div class="text-sm text-gray-500">总配置数</div>
+                    </div>
+                    <div class="bg-white rounded-lg p-4 text-center shadow-sm">
+                        <div class="text-2xl font-bold text-green-600">${activeCount}</div>
+                        <div class="text-sm text-gray-500">已启用</div>
+                    </div>
+                    <div class="bg-white rounded-lg p-4 text-center shadow-sm">
+                        <div class="text-2xl font-bold text-purple-600">${autoSendCount}</div>
+                        <div class="text-sm text-gray-500">自动派送</div>
+                    </div>
+                    <div class="bg-white rounded-lg p-4 text-center shadow-sm">
+                        <div class="text-2xl font-bold text-orange-600">${configs.length - activeCount}</div>
+                        <div class="text-sm text-gray-500">已禁用</div>
+                    </div>
+                </div>
+                
+                <!-- 配置列表 -->
+                <div class="p-4">
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        ${configs.length === 0 ? `
+                            <div class="col-span-2 text-center py-10 text-gray-500">
+                                <i class="fas fa-inbox text-4xl mb-3"></i>
+                                <p>暂无红利配置</p>
+                                <button onclick="showAddBonusConfig()" class="btn btn-primary mt-4">
+                                    <i class="fas fa-plus mr-1"></i>添加首个配置
+                                </button>
+                            </div>
+                        ` : configs.map(c => {
+                            const typeInfo = bonusTypeOptions[c.bonus_type] || { label: c.bonus_type, color: 'gray', icon: 'fa-gift' };
+                            const triggerInfo = triggerTypeOptions[c.trigger_type] || triggerTypeOptions['manual'];
+                            return `
+                                <div class="border rounded-lg overflow-hidden hover:shadow-lg transition-shadow ${c.status !== 1 ? 'opacity-60' : ''}">
+                                    <div class="bg-gradient-to-r from-${typeInfo.color}-50 to-${typeInfo.color}-100 p-4 border-b">
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex items-center">
+                                                <div class="w-10 h-10 rounded-full bg-${typeInfo.color}-500 text-white flex items-center justify-center mr-3">
+                                                    <i class="fas ${typeInfo.icon}"></i>
+                                                </div>
+                                                <div>
+                                                    <div class="font-semibold text-gray-800">${escapeHtml(c.bonus_name)}</div>
+                                                    <span class="text-xs text-${typeInfo.color}-600">${typeInfo.label}</span>
+                                                </div>
+                                            </div>
+                                            <div class="flex items-center space-x-2">
+                                                ${c.auto_send === 1 ? '<span class="badge badge-purple"><i class="fas fa-robot mr-1"></i>自动</span>' : ''}
+                                                <span class="badge ${c.status === 1 ? 'badge-success' : 'badge-danger'}">
+                                                    ${c.status === 1 ? '启用' : '禁用'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="p-4">
+                                        <div class="grid grid-cols-2 gap-3 text-sm mb-3">
+                                            <div class="flex items-center">
+                                                <i class="fas fa-percentage text-gray-400 w-5"></i>
+                                                <span class="text-gray-500 mr-1">比例:</span>
+                                                <span class="font-semibold text-green-600">${c.bonus_percentage}%</span>
+                                            </div>
+                                            <div class="flex items-center">
+                                                <i class="fas fa-coins text-gray-400 w-5"></i>
+                                                <span class="text-gray-500 mr-1">上限:</span>
+                                                <span class="font-semibold">¥${formatNumber(c.max_bonus || 0)}</span>
+                                            </div>
+                                            <div class="flex items-center">
+                                                <i class="fas fa-arrow-down text-gray-400 w-5"></i>
+                                                <span class="text-gray-500 mr-1">最低存:</span>
+                                                <span>¥${formatNumber(c.min_deposit || 0)}</span>
+                                            </div>
+                                            <div class="flex items-center">
+                                                <i class="fas fa-clock text-gray-400 w-5"></i>
+                                                <span class="text-gray-500 mr-1">有效期:</span>
+                                                <span>${c.valid_days || 30}天</span>
+                                            </div>
+                                            <div class="flex items-center">
+                                                <i class="fas fa-sync text-gray-400 w-5"></i>
+                                                <span class="text-gray-500 mr-1">流水:</span>
+                                                <span>${c.turnover_rule_name || '无要求'}</span>
+                                            </div>
+                                            <div class="flex items-center">
+                                                <i class="fas fa-bolt text-gray-400 w-5"></i>
+                                                <span class="text-gray-500 mr-1">触发:</span>
+                                                <span>${triggerInfo.label}</span>
+                                            </div>
+                                        </div>
+                                        ${c.vip_levels ? `<div class="text-xs text-gray-500 mb-2"><i class="fas fa-crown mr-1"></i>VIP等级: ${c.vip_levels}</div>` : ''}
+                                        ${c.description ? `<div class="text-xs text-gray-500 line-clamp-2">${escapeHtml(c.description)}</div>` : ''}
+                                        <div class="flex justify-end space-x-2 mt-3 pt-3 border-t">
+                                            <button onclick="toggleBonusConfigStatus(${c.config_id}, ${c.status === 1 ? 0 : 1})" class="btn btn-sm ${c.status === 1 ? 'btn-outline text-orange-500' : 'btn-outline text-green-500'}">
+                                                <i class="fas ${c.status === 1 ? 'fa-pause' : 'fa-play'} mr-1"></i>${c.status === 1 ? '禁用' : '启用'}
+                                            </button>
+                                            <button onclick="showEditBonusConfig(${c.config_id})" class="btn btn-sm btn-outline">
+                                                <i class="fas fa-edit mr-1"></i>编辑
+                                            </button>
+                                            <button onclick="deleteBonusConfig(${c.config_id})" class="btn btn-sm btn-outline text-red-500 hover:bg-red-50">
+                                                <i class="fas fa-trash mr-1"></i>删除
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
                 </div>
             </div>
-        `, '800px');
+        `;
+    } catch (error) {
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+// 显示新增红利配置弹窗
+function showAddBonusConfig() {
+    const rules = window._turnoverRules || [];
+    
+    openModal(`
+        <div class="card-header bg-gradient-to-r from-pink-500 to-rose-600 text-white">
+            <i class="fas fa-plus mr-2"></i>新增红利配置
+        </div>
+        <div class="p-6 max-h-[75vh] overflow-y-auto">
+            <form id="addBonusConfigForm" class="space-y-4">
+                <!-- 基本信息 -->
+                <div class="bg-gray-50 rounded-lg p-4">
+                    <h4 class="font-semibold text-gray-700 mb-3"><i class="fas fa-info-circle mr-1"></i>基本信息</h4>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">红利类型 *</label>
+                            <select id="newBonusType" required class="form-input w-full">
+                                <option value="">请选择类型</option>
+                                ${Object.entries(bonusTypeOptions).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">配置名称 *</label>
+                            <input type="text" id="newBonusName" required class="form-input w-full" placeholder="如: 首存100%红利">
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">配置描述</label>
+                        <textarea id="newBonusDesc" rows="2" class="form-input w-full" placeholder="红利活动说明..."></textarea>
+                    </div>
+                </div>
+                
+                <!-- 红利方案 -->
+                <div class="bg-blue-50 rounded-lg p-4">
+                    <h4 class="font-semibold text-gray-700 mb-3"><i class="fas fa-calculator mr-1"></i>红利方案</h4>
+                    <div class="grid grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">红利比例 (%)</label>
+                            <input type="number" id="newBonusPercentage" step="0.01" min="0" max="100" value="0" class="form-input w-full" placeholder="如: 100">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">红利上限 (¥)</label>
+                            <input type="number" id="newMaxBonus" step="0.01" min="0" value="0" class="form-input w-full" placeholder="0表示无上限">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">最低存款 (¥)</label>
+                            <input type="number" id="newMinDeposit" step="0.01" min="0" value="0" class="form-input w-full" placeholder="触发最低金额">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4 mt-3">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">有效天数</label>
+                            <input type="number" id="newValidDays" min="1" value="30" class="form-input w-full">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">关联流水规则</label>
+                            <select id="newTurnoverRule" class="form-input w-full">
+                                <option value="">无流水要求</option>
+                                ${rules.filter(r => r.status === 1).map(r => `<option value="${r.rule_id}">${escapeHtml(r.rule_name)} (${r.multiplier}倍)</option>`).join('')}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 自动派送设置 -->
+                <div class="bg-purple-50 rounded-lg p-4">
+                    <h4 class="font-semibold text-gray-700 mb-3"><i class="fas fa-robot mr-1"></i>自动派送设置</h4>
+                    <div class="flex items-center mb-3">
+                        <input type="checkbox" id="newAutoSend" class="mr-2" onchange="toggleAutoSendOptions()">
+                        <label for="newAutoSend" class="text-sm font-medium text-gray-700">启用自动派送</label>
+                    </div>
+                    <div id="autoSendOptions" class="hidden">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">触发类型</label>
+                                <select id="newTriggerType" class="form-input w-full">
+                                    ${Object.entries(triggerTypeOptions).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('')}
+                                </select>
+                                <p id="triggerTypeDesc" class="text-xs text-gray-500 mt-1">${triggerTypeOptions['manual'].desc}</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">触发金额 (¥)</label>
+                                <input type="number" id="newTriggerAmount" step="0.01" min="0" value="0" class="form-input w-full" placeholder="0表示不限">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 限制条件 -->
+                <div class="bg-orange-50 rounded-lg p-4">
+                    <h4 class="font-semibold text-gray-700 mb-3"><i class="fas fa-shield-alt mr-1"></i>限制条件</h4>
+                    <div class="grid grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">每日限领次数</label>
+                            <input type="number" id="newDailyLimit" min="0" value="0" class="form-input w-full" placeholder="0表示不限">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">总共限领次数</label>
+                            <input type="number" id="newTotalLimit" min="0" value="0" class="form-input w-full" placeholder="0表示不限">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">排序权重</label>
+                            <input type="number" id="newSortOrder" min="0" value="0" class="form-input w-full">
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">限定VIP等级 (逗号分隔)</label>
+                        <input type="text" id="newVipLevels" class="form-input w-full" placeholder="如: 1,2,3 或留空表示全部等级">
+                    </div>
+                </div>
+                
+                <!-- 状态 -->
+                <div class="flex items-center">
+                    <input type="checkbox" id="newStatus" checked class="mr-2">
+                    <label for="newStatus" class="text-sm font-medium text-gray-700">立即启用此配置</label>
+                </div>
+                
+                <div class="flex justify-end space-x-2 pt-4">
+                    <button type="button" onclick="closeModal()" class="btn btn-outline">取消</button>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save mr-1"></i>保存配置</button>
+                </div>
+            </form>
+        </div>
+    `, '700px');
+    
+    // 绑定触发类型切换
+    document.getElementById('newTriggerType').onchange = function() {
+        const info = triggerTypeOptions[this.value] || triggerTypeOptions['manual'];
+        document.getElementById('triggerTypeDesc').textContent = info.desc;
+    };
+    
+    // 绑定表单提交
+    document.getElementById('addBonusConfigForm').onsubmit = async (e) => {
+        e.preventDefault();
+        await submitNewBonusConfig();
+    };
+}
+
+function toggleAutoSendOptions() {
+    const checked = document.getElementById('newAutoSend')?.checked || document.getElementById('editAutoSend')?.checked;
+    const optionsDiv = document.getElementById('autoSendOptions') || document.getElementById('editAutoSendOptions');
+    if (optionsDiv) {
+        optionsDiv.classList.toggle('hidden', !checked);
+    }
+}
+
+async function submitNewBonusConfig() {
+    const data = {
+        bonus_type: document.getElementById('newBonusType').value,
+        bonus_name: document.getElementById('newBonusName').value,
+        description: document.getElementById('newBonusDesc').value,
+        bonus_percentage: parseFloat(document.getElementById('newBonusPercentage').value) || 0,
+        max_bonus: parseFloat(document.getElementById('newMaxBonus').value) || 0,
+        min_deposit: parseFloat(document.getElementById('newMinDeposit').value) || 0,
+        valid_days: parseInt(document.getElementById('newValidDays').value) || 30,
+        turnover_rule_id: document.getElementById('newTurnoverRule').value ? parseInt(document.getElementById('newTurnoverRule').value) : null,
+        auto_send: document.getElementById('newAutoSend').checked ? 1 : 0,
+        trigger_type: document.getElementById('newTriggerType').value || 'manual',
+        trigger_amount: parseFloat(document.getElementById('newTriggerAmount').value) || 0,
+        daily_limit: parseInt(document.getElementById('newDailyLimit').value) || 0,
+        total_limit: parseInt(document.getElementById('newTotalLimit').value) || 0,
+        sort_order: parseInt(document.getElementById('newSortOrder').value) || 0,
+        vip_levels: document.getElementById('newVipLevels').value,
+        status: document.getElementById('newStatus').checked ? 1 : 0
+    };
+    
+    if (!data.bonus_type || !data.bonus_name) {
+        alert('请填写红利类型和名称');
+        return;
+    }
+    
+    try {
+        const res = await apiRequest('/bonus/configs', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+        
+        if (res.success) {
+            alert('红利配置已创建');
+            closeModal();
+            renderBonusConfigs();
+        } else {
+            alert(res.message || '创建失败');
+        }
+    } catch (error) {
+        alert('创建失败: ' + error.message);
+    }
+}
+
+// 显示编辑红利配置弹窗
+async function showEditBonusConfig(configId) {
+    try {
+        const [configRes, rulesRes] = await Promise.all([
+            apiRequest(`/bonus/configs/${configId}`),
+            apiRequest('/finance/turnover-rules')
+        ]);
+        
+        const config = configRes.data;
+        const rules = rulesRes.data || [];
+        
+        if (!config) {
+            alert('配置不存在');
+            return;
+        }
+        
+        openModal(`
+            <div class="card-header bg-gradient-to-r from-blue-500 to-indigo-600 text-white">
+                <i class="fas fa-edit mr-2"></i>编辑红利配置
+            </div>
+            <div class="p-6 max-h-[75vh] overflow-y-auto">
+                <form id="editBonusConfigForm" class="space-y-4">
+                    <!-- 基本信息 -->
+                    <div class="bg-gray-50 rounded-lg p-4">
+                        <h4 class="font-semibold text-gray-700 mb-3"><i class="fas fa-info-circle mr-1"></i>基本信息</h4>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">红利类型 *</label>
+                                <select id="editBonusType" required class="form-input w-full">
+                                    ${Object.entries(bonusTypeOptions).map(([k, v]) => `<option value="${k}" ${config.bonus_type === k ? 'selected' : ''}>${v.label}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">配置名称 *</label>
+                                <input type="text" id="editBonusName" required value="${escapeAttr(config.bonus_name)}" class="form-input w-full">
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">配置描述</label>
+                            <textarea id="editBonusDesc" rows="2" class="form-input w-full">${escapeHtml(config.description || '')}</textarea>
+                        </div>
+                    </div>
+                    
+                    <!-- 红利方案 -->
+                    <div class="bg-blue-50 rounded-lg p-4">
+                        <h4 class="font-semibold text-gray-700 mb-3"><i class="fas fa-calculator mr-1"></i>红利方案</h4>
+                        <div class="grid grid-cols-3 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">红利比例 (%)</label>
+                                <input type="number" id="editBonusPercentage" step="0.01" min="0" max="100" value="${config.bonus_percentage || 0}" class="form-input w-full">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">红利上限 (¥)</label>
+                                <input type="number" id="editMaxBonus" step="0.01" min="0" value="${config.max_bonus || 0}" class="form-input w-full">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">最低存款 (¥)</label>
+                                <input type="number" id="editMinDeposit" step="0.01" min="0" value="${config.min_deposit || 0}" class="form-input w-full">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 mt-3">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">有效天数</label>
+                                <input type="number" id="editValidDays" min="1" value="${config.valid_days || 30}" class="form-input w-full">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">关联流水规则</label>
+                                <select id="editTurnoverRule" class="form-input w-full">
+                                    <option value="">无流水要求</option>
+                                    ${rules.filter(r => r.status === 1).map(r => `<option value="${r.rule_id}" ${config.turnover_rule_id === r.rule_id ? 'selected' : ''}>${escapeHtml(r.rule_name)} (${r.multiplier}倍)</option>`).join('')}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 自动派送设置 -->
+                    <div class="bg-purple-50 rounded-lg p-4">
+                        <h4 class="font-semibold text-gray-700 mb-3"><i class="fas fa-robot mr-1"></i>自动派送设置</h4>
+                        <div class="flex items-center mb-3">
+                            <input type="checkbox" id="editAutoSend" ${config.auto_send === 1 ? 'checked' : ''} class="mr-2" onchange="toggleEditAutoSendOptions()">
+                            <label for="editAutoSend" class="text-sm font-medium text-gray-700">启用自动派送</label>
+                        </div>
+                        <div id="editAutoSendOptions" class="${config.auto_send !== 1 ? 'hidden' : ''}">
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">触发类型</label>
+                                    <select id="editTriggerType" class="form-input w-full">
+                                        ${Object.entries(triggerTypeOptions).map(([k, v]) => `<option value="${k}" ${config.trigger_type === k ? 'selected' : ''}>${v.label}</option>`).join('')}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">触发金额 (¥)</label>
+                                    <input type="number" id="editTriggerAmount" step="0.01" min="0" value="${config.trigger_amount || 0}" class="form-input w-full">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 限制条件 -->
+                    <div class="bg-orange-50 rounded-lg p-4">
+                        <h4 class="font-semibold text-gray-700 mb-3"><i class="fas fa-shield-alt mr-1"></i>限制条件</h4>
+                        <div class="grid grid-cols-3 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">每日限领次数</label>
+                                <input type="number" id="editDailyLimit" min="0" value="${config.daily_limit || 0}" class="form-input w-full">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">总共限领次数</label>
+                                <input type="number" id="editTotalLimit" min="0" value="${config.total_limit || 0}" class="form-input w-full">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">排序权重</label>
+                                <input type="number" id="editSortOrder" min="0" value="${config.sort_order || 0}" class="form-input w-full">
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">限定VIP等级 (逗号分隔)</label>
+                            <input type="text" id="editVipLevels" value="${config.vip_levels || ''}" class="form-input w-full">
+                        </div>
+                    </div>
+                    
+                    <!-- 状态 -->
+                    <div class="flex items-center">
+                        <input type="checkbox" id="editStatus" ${config.status === 1 ? 'checked' : ''} class="mr-2">
+                        <label for="editStatus" class="text-sm font-medium text-gray-700">启用此配置</label>
+                    </div>
+                    
+                    <div class="flex justify-end space-x-2 pt-4">
+                        <button type="button" onclick="closeModal()" class="btn btn-outline">取消</button>
+                        <button type="submit" class="btn btn-primary"><i class="fas fa-save mr-1"></i>保存修改</button>
+                    </div>
+                </form>
+            </div>
+        `, '700px');
+        
+        // 绑定表单提交
+        document.getElementById('editBonusConfigForm').onsubmit = async (e) => {
+            e.preventDefault();
+            await submitEditBonusConfig(configId);
+        };
     } catch (error) {
         alert('获取配置失败: ' + error.message);
     }
+}
+
+function toggleEditAutoSendOptions() {
+    const checked = document.getElementById('editAutoSend')?.checked;
+    const optionsDiv = document.getElementById('editAutoSendOptions');
+    if (optionsDiv) {
+        optionsDiv.classList.toggle('hidden', !checked);
+    }
+}
+
+async function submitEditBonusConfig(configId) {
+    const data = {
+        bonus_type: document.getElementById('editBonusType').value,
+        bonus_name: document.getElementById('editBonusName').value,
+        description: document.getElementById('editBonusDesc').value,
+        bonus_percentage: parseFloat(document.getElementById('editBonusPercentage').value) || 0,
+        max_bonus: parseFloat(document.getElementById('editMaxBonus').value) || 0,
+        min_deposit: parseFloat(document.getElementById('editMinDeposit').value) || 0,
+        valid_days: parseInt(document.getElementById('editValidDays').value) || 30,
+        turnover_rule_id: document.getElementById('editTurnoverRule').value ? parseInt(document.getElementById('editTurnoverRule').value) : null,
+        auto_send: document.getElementById('editAutoSend').checked ? 1 : 0,
+        trigger_type: document.getElementById('editTriggerType').value || 'manual',
+        trigger_amount: parseFloat(document.getElementById('editTriggerAmount').value) || 0,
+        daily_limit: parseInt(document.getElementById('editDailyLimit').value) || 0,
+        total_limit: parseInt(document.getElementById('editTotalLimit').value) || 0,
+        sort_order: parseInt(document.getElementById('editSortOrder').value) || 0,
+        vip_levels: document.getElementById('editVipLevels').value,
+        status: document.getElementById('editStatus').checked ? 1 : 0
+    };
+    
+    try {
+        const res = await apiRequest(`/bonus/configs/${configId}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+        
+        if (res.success) {
+            alert('配置已更新');
+            closeModal();
+            renderBonusConfigs();
+        } else {
+            alert(res.message || '更新失败');
+        }
+    } catch (error) {
+        alert('更新失败: ' + error.message);
+    }
+}
+
+async function toggleBonusConfigStatus(configId, newStatus) {
+    if (!confirm(`确定要${newStatus === 1 ? '启用' : '禁用'}此红利配置吗？`)) return;
+    
+    try {
+        const res = await apiRequest(`/bonus/configs/${configId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ status: newStatus })
+        });
+        
+        if (res.success) {
+            renderBonusConfigs();
+        } else {
+            alert(res.message || '操作失败');
+        }
+    } catch (error) {
+        alert('操作失败: ' + error.message);
+    }
+}
+
+async function deleteBonusConfig(configId) {
+    if (!confirm('确定要删除此红利配置吗？此操作不可恢复！')) return;
+    
+    try {
+        const res = await apiRequest(`/bonus/configs/${configId}`, {
+            method: 'DELETE'
+        });
+        
+        if (res.success) {
+            alert('配置已删除');
+            renderBonusConfigs();
+        } else {
+            alert(res.message || '删除失败');
+        }
+    } catch (error) {
+        alert('删除失败: ' + error.message);
+    }
+}
+
+// 原有的简易弹窗配置查看函数（保留兼容性）
+async function showBonusConfigs() {
+    // 直接跳转到红利配置页面
+    handleMenuClick('finance-bonus-config');
 }
 
 async function editBonusConfig(configId) {
