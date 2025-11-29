@@ -2651,6 +2651,25 @@ app.get('/api/v1/risk/limit-groups', async (c) => {
   }
 })
 
+// 获取单个限红组详情
+app.get('/api/v1/risk/limit-groups/:group_id', async (c) => {
+  const group_id = parseInt(c.req.param('group_id'))
+  
+  try {
+    const group = await c.env.DB.prepare(`
+      SELECT * FROM bet_limit_groups WHERE group_id = ?
+    `).bind(group_id).first()
+    
+    if (!group) {
+      return c.json({ success: false, message: '限红组不存在' }, 404)
+    }
+    
+    return c.json({ success: true, data: group })
+  } catch (error) {
+    return c.json({ success: false, message: '获取限红组详情失败' }, 500)
+  }
+})
+
 // IP关联分析
 app.get('/api/v1/risk/ip-analysis', async (c) => {
   try {

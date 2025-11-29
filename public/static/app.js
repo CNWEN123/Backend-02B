@@ -3334,7 +3334,7 @@ document.getElementById('modal')?.addEventListener('click', (e) => {
 
 // ==================== 新增页面渲染函数 ====================
 
-// 流水稽核规则
+// 流水稽核规则 - 完整CRUD
 async function renderTurnoverRules() {
     const content = document.getElementById('pageContent');
     try {
@@ -3343,28 +3343,41 @@ async function renderTurnoverRules() {
         
         content.innerHTML = `
             <div class="card">
-                <div class="card-header">
-                    <h3 class="text-lg font-semibold"><i class="fas fa-clipboard-check mr-2"></i>流水稽核规则</h3>
+                <div class="card-header flex items-center justify-between">
+                    <h3 class="text-lg font-semibold"><i class="fas fa-clipboard-check mr-2 text-blue-500"></i>流水稽核规则</h3>
+                    <button onclick="showAddTurnoverRule()" class="btn btn-primary text-sm"><i class="fas fa-plus mr-1"></i>新增规则</button>
                 </div>
                 <div class="p-4">
                     <table class="data-table">
                         <thead>
                             <tr>
+                                <th>ID</th>
                                 <th>规则名称</th>
                                 <th>倍数</th>
                                 <th>适用游戏</th>
                                 <th>有效天数</th>
                                 <th>状态</th>
+                                <th>操作</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${rules.map(r => `
+                            ${rules.length === 0 ? '<tr><td colspan="7" class="text-center text-gray-500 py-4">暂无稽核规则</td></tr>' :
+                            rules.map(r => `
                                 <tr>
-                                    <td>${escapeHtml(r.rule_name)}</td>
-                                    <td class="font-semibold">${r.multiplier}x</td>
+                                    <td>${r.rule_id}</td>
+                                    <td class="font-medium">${escapeHtml(r.rule_name)}</td>
+                                    <td class="font-semibold text-blue-600">${r.multiplier}x</td>
                                     <td class="text-sm">${escapeHtml(r.games_included || '全部')}</td>
                                     <td>${r.valid_days}天</td>
-                                    <td>${r.status === 1 ? '<span class="badge badge-success">启用</span>' : '<span class="badge badge-danger">禁用</span>'}</td>
+                                    <td>
+                                        <button onclick="toggleTurnoverStatus(${r.rule_id}, ${r.status})" class="cursor-pointer">
+                                            ${r.status === 1 ? '<span class="badge badge-success">启用</span>' : '<span class="badge badge-danger">禁用</span>'}
+                                        </button>
+                                    </td>
+                                    <td>
+                                        <button onclick="editTurnoverRule(${r.rule_id})" class="text-blue-500 hover:text-blue-700 mr-2" title="编辑"><i class="fas fa-edit"></i></button>
+                                        <button onclick="deleteTurnoverRule(${r.rule_id}, '${escapeAttr(r.rule_name)}')" class="text-red-500 hover:text-red-700" title="删除"><i class="fas fa-trash"></i></button>
+                                    </td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -3374,6 +3387,123 @@ async function renderTurnoverRules() {
         `;
     } catch (error) {
         content.innerHTML = '<div class="text-center text-red-500 py-10">加载失败: ' + escapeHtml(error.message) + '</div>';
+    }
+}
+
+function showAddTurnoverRule() {
+    openModal(`
+        <div class="card-header"><i class="fas fa-plus-circle mr-2 text-blue-500"></i>新增流水稽核规则</div>
+        <div class="p-6">
+            <form id="turnoverRuleForm" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">规则名称 *</label>
+                    <input type="text" id="turnoverRuleName" required class="form-input w-full" placeholder="如：普通存款流水">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">流水倍数 *</label>
+                        <input type="number" id="turnoverMultiplier" required step="0.1" min="0" class="form-input w-full" placeholder="如：3">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">有效天数 *</label>
+                        <input type="number" id="turnoverValidDays" required min="1" class="form-input w-full" placeholder="如：30">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">适用游戏</label>
+                    <input type="text" id="turnoverGames" class="form-input w-full" placeholder="留空表示全部，多个用逗号分隔：百家乐,龙虎">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">描述说明</label>
+                    <textarea id="turnoverDescription" rows="2" class="form-input w-full" placeholder="规则描述"></textarea>
+                </div>
+                <div class="flex items-center">
+                    <input type="checkbox" id="turnoverStatus" checked class="mr-2">
+                    <label for="turnoverStatus" class="text-sm">立即启用</label>
+                </div>
+                <div class="flex justify-end space-x-2 pt-4">
+                    <button type="button" onclick="closeModal()" class="btn btn-outline">取消</button>
+                    <button type="submit" class="btn btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    `);
+    document.getElementById('turnoverRuleForm').onsubmit = async (e) => { e.preventDefault(); await submitTurnoverRule(); };
+}
+
+async function submitTurnoverRule(ruleId = null) {
+    const data = {
+        rule_name: document.getElementById('turnoverRuleName').value,
+        multiplier: parseFloat(document.getElementById('turnoverMultiplier').value),
+        valid_days: parseInt(document.getElementById('turnoverValidDays').value),
+        games_included: document.getElementById('turnoverGames').value || null,
+        description: document.getElementById('turnoverDescription').value || null,
+        status: document.getElementById('turnoverStatus').checked ? 1 : 0
+    };
+    
+    try {
+        const url = ruleId ? `/finance/turnover-rules/${ruleId}` : '/finance/turnover-rules';
+        const method = ruleId ? 'PUT' : 'POST';
+        const res = await apiRequest(url, { method, body: JSON.stringify(data) });
+        if (res.success) {
+            alert(ruleId ? '更新成功' : '添加成功');
+            closeModal();
+            renderTurnoverRules();
+        } else {
+            alert(res.message || '操作失败');
+        }
+    } catch (error) {
+        alert('操作失败: ' + error.message);
+    }
+}
+
+async function editTurnoverRule(ruleId) {
+    try {
+        const res = await apiRequest(`/finance/turnover-rules/${ruleId}`);
+        const rule = res.data;
+        showAddTurnoverRule();
+        document.querySelector('.card-header').innerHTML = '<i class="fas fa-edit mr-2 text-blue-500"></i>编辑流水稽核规则';
+        document.getElementById('turnoverRuleName').value = rule.rule_name || '';
+        document.getElementById('turnoverMultiplier').value = rule.multiplier || '';
+        document.getElementById('turnoverValidDays').value = rule.valid_days || '';
+        document.getElementById('turnoverGames').value = rule.games_included || '';
+        document.getElementById('turnoverDescription').value = rule.description || '';
+        document.getElementById('turnoverStatus').checked = rule.status === 1;
+        document.getElementById('turnoverRuleForm').onsubmit = async (e) => { e.preventDefault(); await submitTurnoverRule(ruleId); };
+    } catch (error) {
+        alert('获取规则信息失败: ' + error.message);
+    }
+}
+
+async function deleteTurnoverRule(ruleId, ruleName) {
+    if (!confirm(`确定要删除流水稽核规则「${ruleName}」吗？`)) return;
+    try {
+        const res = await apiRequest(`/finance/turnover-rules/${ruleId}`, { method: 'DELETE' });
+        if (res.success) {
+            alert('删除成功');
+            renderTurnoverRules();
+        } else {
+            alert(res.message || '删除失败');
+        }
+    } catch (error) {
+        alert('删除失败: ' + error.message);
+    }
+}
+
+async function toggleTurnoverStatus(ruleId, currentStatus) {
+    const newStatus = currentStatus === 1 ? 0 : 1;
+    try {
+        const res = await apiRequest(`/finance/turnover-rules/${ruleId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ status: newStatus })
+        });
+        if (res.success) {
+            renderTurnoverRules();
+        } else {
+            alert(res.message || '操作失败');
+        }
+    } catch (error) {
+        alert('操作失败: ' + error.message);
     }
 }
 
@@ -3470,7 +3600,7 @@ async function renderSpecialBets() {
     }
 }
 
-// 风控规则
+// 风控规则 - 完整CRUD
 async function renderRiskRules() {
     const content = document.getElementById('pageContent');
     try {
@@ -3479,25 +3609,34 @@ async function renderRiskRules() {
         
         content.innerHTML = `
             <div class="card">
-                <div class="card-header">
-                    <h3 class="text-lg font-semibold"><i class="fas fa-gavel mr-2"></i>风控规则</h3>
+                <div class="card-header flex items-center justify-between">
+                    <h3 class="text-lg font-semibold"><i class="fas fa-gavel mr-2 text-red-500"></i>风控规则管理</h3>
+                    <button onclick="showAddRiskRule()" class="btn btn-primary text-sm"><i class="fas fa-plus mr-1"></i>新增规则</button>
                 </div>
                 <div class="p-4">
                     <table class="data-table">
                         <thead>
-                            <tr><th>ID</th><th>规则名称</th><th>类型</th><th>触发条件</th><th>处理动作</th><th>预警次数</th><th>状态</th></tr>
+                            <tr><th>ID</th><th>规则名称</th><th>类型</th><th>触发条件</th><th>处理动作</th><th>预警次数</th><th>状态</th><th>操作</th></tr>
                         </thead>
                         <tbody>
-                            ${rules.length === 0 ? '<tr><td colspan="7" class="text-center text-gray-500 py-4">暂无风控规则</td></tr>' : 
+                            ${rules.length === 0 ? '<tr><td colspan="8" class="text-center text-gray-500 py-4">暂无风控规则</td></tr>' : 
                             rules.map(r => `
                                 <tr>
                                     <td>${r.rule_id}</td>
                                     <td class="font-medium">${escapeHtml(r.rule_name || '')}</td>
-                                    <td><span class="badge badge-info">${escapeHtml(r.rule_type || '')}</span></td>
-                                    <td class="text-sm">${escapeHtml(r.rule_condition || '')}</td>
-                                    <td><span class="badge badge-warning">${escapeHtml(r.rule_action || '')}</span></td>
-                                    <td>${r.alert_count || 0}</td>
-                                    <td>${r.status === 1 ? '<span class="badge badge-success">启用</span>' : '<span class="badge badge-danger">禁用</span>'}</td>
+                                    <td><span class="badge badge-info">${getRiskTypeLabel(r.rule_type)}</span></td>
+                                    <td class="text-sm max-w-xs truncate" title="${escapeAttr(r.rule_condition || '')}">${escapeHtml(r.rule_condition || '-')}</td>
+                                    <td><span class="badge badge-warning">${getRiskActionLabel(r.rule_action)}</span></td>
+                                    <td><span class="font-semibold text-red-600">${r.alert_count || 0}</span></td>
+                                    <td>
+                                        <button onclick="toggleRiskRuleStatus(${r.rule_id}, ${r.status})" class="cursor-pointer">
+                                            ${r.status === 1 ? '<span class="badge badge-success">启用</span>' : '<span class="badge badge-danger">禁用</span>'}
+                                        </button>
+                                    </td>
+                                    <td>
+                                        <button onclick="editRiskRule(${r.rule_id})" class="text-blue-500 hover:text-blue-700 mr-2" title="编辑"><i class="fas fa-edit"></i></button>
+                                        <button onclick="deleteRiskRule(${r.rule_id}, '${escapeAttr(r.rule_name)}')" class="text-red-500 hover:text-red-700" title="删除"><i class="fas fa-trash"></i></button>
+                                    </td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -3510,7 +3649,180 @@ async function renderRiskRules() {
     }
 }
 
-// 限红组
+function getRiskTypeLabel(type) {
+    const types = {
+        'bet_amount': '单笔投注额',
+        'win_amount': '单笔赢额',
+        'daily_win': '日赢额',
+        'daily_loss': '日输额',
+        'consecutive_win': '连续赢',
+        'ip_multi_account': 'IP多账号',
+        'device_multi_account': '设备多账号',
+        'pattern_bet': '投注模式'
+    };
+    return types[type] || type || '-';
+}
+
+function getRiskActionLabel(action) {
+    const actions = {
+        'alert': '预警通知',
+        'freeze': '冻结账户',
+        'limit_bet': '限制投注',
+        'notify_admin': '通知管理员',
+        'auto_review': '自动审核'
+    };
+    return actions[action] || action || '-';
+}
+
+function showAddRiskRule() {
+    openModal(`
+        <div class="card-header"><i class="fas fa-plus-circle mr-2 text-red-500"></i>新增风控规则</div>
+        <div class="p-6">
+            <form id="riskRuleForm" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">规则名称 *</label>
+                    <input type="text" id="riskRuleName" required class="form-input w-full" placeholder="如：单笔大额投注预警">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">规则类型 *</label>
+                        <select id="riskRuleType" required class="form-input w-full">
+                            <option value="">请选择</option>
+                            <option value="bet_amount">单笔投注额</option>
+                            <option value="win_amount">单笔赢额</option>
+                            <option value="daily_win">日赢额</option>
+                            <option value="daily_loss">日输额</option>
+                            <option value="consecutive_win">连续赢</option>
+                            <option value="ip_multi_account">IP多账号</option>
+                            <option value="device_multi_account">设备多账号</option>
+                            <option value="pattern_bet">投注模式</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">处理动作 *</label>
+                        <select id="riskRuleAction" required class="form-input w-full">
+                            <option value="">请选择</option>
+                            <option value="alert">预警通知</option>
+                            <option value="notify_admin">通知管理员</option>
+                            <option value="limit_bet">限制投注</option>
+                            <option value="freeze">冻结账户</option>
+                            <option value="auto_review">自动审核</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">触发条件 *</label>
+                    <input type="text" id="riskRuleCondition" required class="form-input w-full" placeholder="如：amount > 50000 或 count > 5">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">阈值</label>
+                        <input type="number" id="riskRuleThreshold" class="form-input w-full" placeholder="数值阈值">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">统计时间(分钟)</label>
+                        <input type="number" id="riskRuleTimeWindow" class="form-input w-full" placeholder="如：60">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">描述说明</label>
+                    <textarea id="riskRuleDescription" rows="2" class="form-input w-full" placeholder="规则描述"></textarea>
+                </div>
+                <div class="flex items-center">
+                    <input type="checkbox" id="riskRuleStatus" checked class="mr-2">
+                    <label for="riskRuleStatus" class="text-sm">立即启用</label>
+                </div>
+                <div class="flex justify-end space-x-2 pt-4">
+                    <button type="button" onclick="closeModal()" class="btn btn-outline">取消</button>
+                    <button type="submit" class="btn btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    `);
+    document.getElementById('riskRuleForm').onsubmit = async (e) => { e.preventDefault(); await submitRiskRule(); };
+}
+
+async function submitRiskRule(ruleId = null) {
+    const data = {
+        rule_name: document.getElementById('riskRuleName').value,
+        rule_type: document.getElementById('riskRuleType').value,
+        rule_action: document.getElementById('riskRuleAction').value,
+        rule_condition: document.getElementById('riskRuleCondition').value,
+        threshold_value: document.getElementById('riskRuleThreshold').value ? parseFloat(document.getElementById('riskRuleThreshold').value) : null,
+        time_window: document.getElementById('riskRuleTimeWindow').value ? parseInt(document.getElementById('riskRuleTimeWindow').value) : null,
+        description: document.getElementById('riskRuleDescription').value || null,
+        status: document.getElementById('riskRuleStatus').checked ? 1 : 0
+    };
+    
+    try {
+        const url = ruleId ? `/risk/rules/${ruleId}` : '/risk/rules';
+        const method = ruleId ? 'PUT' : 'POST';
+        const res = await apiRequest(url, { method, body: JSON.stringify(data) });
+        if (res.success) {
+            alert(ruleId ? '更新成功' : '添加成功');
+            closeModal();
+            renderRiskRules();
+        } else {
+            alert(res.message || '操作失败');
+        }
+    } catch (error) {
+        alert('操作失败: ' + error.message);
+    }
+}
+
+async function editRiskRule(ruleId) {
+    try {
+        const res = await apiRequest(`/risk/rules/${ruleId}`);
+        const rule = res.data;
+        showAddRiskRule();
+        document.querySelector('.card-header').innerHTML = '<i class="fas fa-edit mr-2 text-red-500"></i>编辑风控规则';
+        document.getElementById('riskRuleName').value = rule.rule_name || '';
+        document.getElementById('riskRuleType').value = rule.rule_type || '';
+        document.getElementById('riskRuleAction').value = rule.rule_action || '';
+        document.getElementById('riskRuleCondition').value = rule.rule_condition || '';
+        document.getElementById('riskRuleThreshold').value = rule.threshold_value || '';
+        document.getElementById('riskRuleTimeWindow').value = rule.time_window || '';
+        document.getElementById('riskRuleDescription').value = rule.description || '';
+        document.getElementById('riskRuleStatus').checked = rule.status === 1;
+        document.getElementById('riskRuleForm').onsubmit = async (e) => { e.preventDefault(); await submitRiskRule(ruleId); };
+    } catch (error) {
+        alert('获取规则信息失败: ' + error.message);
+    }
+}
+
+async function deleteRiskRule(ruleId, ruleName) {
+    if (!confirm(`确定要删除风控规则「${ruleName}」吗？此操作不可恢复！`)) return;
+    try {
+        const res = await apiRequest(`/risk/rules/${ruleId}`, { method: 'DELETE' });
+        if (res.success) {
+            alert('删除成功');
+            renderRiskRules();
+        } else {
+            alert(res.message || '删除失败');
+        }
+    } catch (error) {
+        alert('删除失败: ' + error.message);
+    }
+}
+
+async function toggleRiskRuleStatus(ruleId, currentStatus) {
+    const newStatus = currentStatus === 1 ? 0 : 1;
+    try {
+        const res = await apiRequest(`/risk/rules/${ruleId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ status: newStatus })
+        });
+        if (res.success) {
+            renderRiskRules();
+        } else {
+            alert(res.message || '操作失败');
+        }
+    } catch (error) {
+        alert('操作失败: ' + error.message);
+    }
+}
+
+// 限红组 - 完整CRUD
 async function renderLimitGroups() {
     const content = document.getElementById('pageContent');
     try {
@@ -3519,22 +3831,28 @@ async function renderLimitGroups() {
         
         content.innerHTML = `
             <div class="card">
-                <div class="card-header">
-                    <h3 class="text-lg font-semibold"><i class="fas fa-hand-holding-usd mr-2"></i>限红组管理</h3>
+                <div class="card-header flex items-center justify-between">
+                    <h3 class="text-lg font-semibold"><i class="fas fa-hand-holding-usd mr-2 text-orange-500"></i>限红组管理</h3>
+                    <button onclick="showAddLimitGroup()" class="btn btn-primary text-sm"><i class="fas fa-plus mr-1"></i>新增限红组</button>
                 </div>
                 <div class="p-4">
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        ${groups.map(g => `
-                            <div class="bg-gray-50 rounded-lg p-4">
+                        ${groups.length === 0 ? '<div class="col-span-3 text-center text-gray-500 py-10">暂无限红组</div>' :
+                        groups.map(g => `
+                            <div class="bg-gray-50 rounded-lg p-4 hover:shadow-lg transition">
                                 <div class="flex items-center justify-between mb-3">
                                     <h4 class="font-semibold">${escapeHtml(g.group_name)}</h4>
                                     <span class="badge badge-info">${g.user_count || 0}人</span>
                                 </div>
                                 <p class="text-gray-500 text-sm mb-3">${escapeHtml(g.description) || '无描述'}</p>
                                 <div class="space-y-2 text-sm">
-                                    <div class="flex justify-between"><span>百家乐</span><span>¥${formatNumber(g.baccarat_min)}-${formatNumber(g.baccarat_max)}</span></div>
-                                    <div class="flex justify-between"><span>龙虎</span><span>¥${formatNumber(g.dragon_tiger_min)}-${formatNumber(g.dragon_tiger_max)}</span></div>
-                                    <div class="flex justify-between"><span>轮盘</span><span>¥${formatNumber(g.roulette_min)}-${formatNumber(g.roulette_max)}</span></div>
+                                    <div class="flex justify-between"><span>百家乐</span><span>¥${formatNumber(g.baccarat_min || 0)}-${formatNumber(g.baccarat_max || 0)}</span></div>
+                                    <div class="flex justify-between"><span>龙虎</span><span>¥${formatNumber(g.dragon_tiger_min || 0)}-${formatNumber(g.dragon_tiger_max || 0)}</span></div>
+                                    <div class="flex justify-between"><span>轮盘</span><span>¥${formatNumber(g.roulette_min || 0)}-${formatNumber(g.roulette_max || 0)}</span></div>
+                                </div>
+                                <div class="mt-4 flex space-x-2">
+                                    <button onclick="editLimitGroup(${g.group_id})" class="btn btn-outline text-sm flex-1"><i class="fas fa-edit mr-1"></i>编辑</button>
+                                    <button onclick="deleteLimitGroup(${g.group_id}, '${escapeAttr(g.group_name)}')" class="btn btn-danger text-sm"><i class="fas fa-trash"></i></button>
                                 </div>
                             </div>
                         `).join('')}
@@ -3544,6 +3862,133 @@ async function renderLimitGroups() {
         `;
     } catch (error) {
         content.innerHTML = '<div class="text-center text-red-500 py-10">加载失败: ' + escapeHtml(error.message) + '</div>';
+    }
+}
+
+function showAddLimitGroup() {
+    openModal(`
+        <div class="card-header"><i class="fas fa-plus-circle mr-2 text-orange-500"></i>新增限红组</div>
+        <div class="p-6">
+            <form id="limitGroupForm" class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">组名称 *</label>
+                        <input type="text" id="limitGroupName" required class="form-input w-full" placeholder="如：VIP限红组">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">描述</label>
+                        <input type="text" id="limitGroupDesc" class="form-input w-full" placeholder="组描述">
+                    </div>
+                </div>
+                <div class="border rounded-lg p-4 bg-blue-50">
+                    <h4 class="font-semibold text-blue-700 mb-3"><i class="fas fa-dice mr-1"></i>百家乐限红</h4>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm text-gray-600 mb-1">最小投注</label>
+                            <input type="number" id="limitBaccaratMin" class="form-input w-full" value="100">
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-600 mb-1">最大投注</label>
+                            <input type="number" id="limitBaccaratMax" class="form-input w-full" value="100000">
+                        </div>
+                    </div>
+                </div>
+                <div class="border rounded-lg p-4 bg-green-50">
+                    <h4 class="font-semibold text-green-700 mb-3"><i class="fas fa-dragon mr-1"></i>龙虎限红</h4>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm text-gray-600 mb-1">最小投注</label>
+                            <input type="number" id="limitDragonMin" class="form-input w-full" value="100">
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-600 mb-1">最大投注</label>
+                            <input type="number" id="limitDragonMax" class="form-input w-full" value="50000">
+                        </div>
+                    </div>
+                </div>
+                <div class="border rounded-lg p-4 bg-purple-50">
+                    <h4 class="font-semibold text-purple-700 mb-3"><i class="fas fa-circle-notch mr-1"></i>轮盘限红</h4>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm text-gray-600 mb-1">最小投注</label>
+                            <input type="number" id="limitRouletteMin" class="form-input w-full" value="50">
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-600 mb-1">最大投注</label>
+                            <input type="number" id="limitRouletteMax" class="form-input w-full" value="30000">
+                        </div>
+                    </div>
+                </div>
+                <div class="flex justify-end space-x-2 pt-4">
+                    <button type="button" onclick="closeModal()" class="btn btn-outline">取消</button>
+                    <button type="submit" class="btn btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    `);
+    document.getElementById('limitGroupForm').onsubmit = async (e) => { e.preventDefault(); await submitLimitGroup(); };
+}
+
+async function submitLimitGroup(groupId = null) {
+    const data = {
+        group_name: document.getElementById('limitGroupName').value,
+        description: document.getElementById('limitGroupDesc').value || null,
+        baccarat_min: parseFloat(document.getElementById('limitBaccaratMin').value) || 100,
+        baccarat_max: parseFloat(document.getElementById('limitBaccaratMax').value) || 100000,
+        dragon_tiger_min: parseFloat(document.getElementById('limitDragonMin').value) || 100,
+        dragon_tiger_max: parseFloat(document.getElementById('limitDragonMax').value) || 50000,
+        roulette_min: parseFloat(document.getElementById('limitRouletteMin').value) || 50,
+        roulette_max: parseFloat(document.getElementById('limitRouletteMax').value) || 30000
+    };
+    
+    try {
+        const url = groupId ? `/risk/limit-groups/${groupId}` : '/risk/limit-groups';
+        const method = groupId ? 'PUT' : 'POST';
+        const res = await apiRequest(url, { method, body: JSON.stringify(data) });
+        if (res.success) {
+            alert(groupId ? '更新成功' : '添加成功');
+            closeModal();
+            renderLimitGroups();
+        } else {
+            alert(res.message || '操作失败');
+        }
+    } catch (error) {
+        alert('操作失败: ' + error.message);
+    }
+}
+
+async function editLimitGroup(groupId) {
+    try {
+        const res = await apiRequest(`/risk/limit-groups/${groupId}`);
+        const group = res.data;
+        showAddLimitGroup();
+        document.querySelector('.card-header').innerHTML = '<i class="fas fa-edit mr-2 text-orange-500"></i>编辑限红组';
+        document.getElementById('limitGroupName').value = group.group_name || '';
+        document.getElementById('limitGroupDesc').value = group.description || '';
+        document.getElementById('limitBaccaratMin').value = group.baccarat_min || 100;
+        document.getElementById('limitBaccaratMax').value = group.baccarat_max || 100000;
+        document.getElementById('limitDragonMin').value = group.dragon_tiger_min || 100;
+        document.getElementById('limitDragonMax').value = group.dragon_tiger_max || 50000;
+        document.getElementById('limitRouletteMin').value = group.roulette_min || 50;
+        document.getElementById('limitRouletteMax').value = group.roulette_max || 30000;
+        document.getElementById('limitGroupForm').onsubmit = async (e) => { e.preventDefault(); await submitLimitGroup(groupId); };
+    } catch (error) {
+        alert('获取限红组信息失败: ' + error.message);
+    }
+}
+
+async function deleteLimitGroup(groupId, groupName) {
+    if (!confirm(`确定要删除限红组「${groupName}」吗？已使用此组的玩家将失去限红设置！`)) return;
+    try {
+        const res = await apiRequest(`/risk/limit-groups/${groupId}`, { method: 'DELETE' });
+        if (res.success) {
+            alert('删除成功');
+            renderLimitGroups();
+        } else {
+            alert(res.message || '删除失败');
+        }
+    } catch (error) {
+        alert('删除失败: ' + error.message);
     }
 }
 
