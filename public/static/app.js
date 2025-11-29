@@ -72,7 +72,8 @@ const menuConfig = [
             { id: 'finance-deposits', title: '存款申请', page: 'finance-deposits' },
             { id: 'finance-withdrawals', title: '取款申请', page: 'finance-withdrawals' },
             { id: 'finance-turnover', title: '流水稽核', page: 'finance-turnover' },
-            { id: 'finance-payment-methods', title: '收款方式', page: 'finance-payment-methods', badge: 'NEW' }
+            { id: 'finance-payment-methods', title: '收款方式', page: 'finance-payment-methods' },
+            { id: 'finance-bonus', title: '红利派送', page: 'finance-bonus', badge: 'NEW' }
         ]
     },
     { 
@@ -300,6 +301,7 @@ function loadPage(page) {
         'finance-withdrawals': { title: '取款申请', handler: renderWithdrawals },
         'finance-turnover': { title: '流水稽核', handler: renderTurnoverRules },
         'finance-payment-methods': { title: '收款方式', handler: renderPaymentMethods },
+        'finance-bonus': { title: '红利派送', handler: renderBonusRecords },
         'bets': { title: '注单列表', handler: renderBets },
         'bets-realtime': { title: '实时注单', handler: renderRealtimeBets },
         'bets-special': { title: '特殊注单', handler: renderSpecialBets },
@@ -1303,10 +1305,20 @@ async function renderWithdrawals() {
         const res = await apiRequest('/finance/withdrawals');
         const list = res.data || [];
         
+        // 统计流水未达标数量
+        const failedFlowCount = list.filter(w => !w.flow_check).length;
+        
         content.innerHTML = `
             <div class="card">
-                <div class="card-header">
-                    <span>取款申请 <span class="badge badge-danger">${list.length} 待审核</span></span>
+                <div class="card-header flex items-center justify-between">
+                    <span>
+                        <i class="fas fa-money-bill-wave mr-2 text-green-500"></i>取款申请 
+                        <span class="badge badge-danger ml-2">${list.length} 待审核</span>
+                        ${failedFlowCount > 0 ? `<span class="badge badge-warning ml-1">${failedFlowCount} 流水未达标</span>` : ''}
+                    </span>
+                    <div class="text-sm text-gray-500">
+                        <i class="fas fa-info-circle mr-1"></i>红利派送需完成流水稽核后才能提现
+                    </div>
                 </div>
                 <div class="card-body">
                     ${list.length ? `
@@ -1317,36 +1329,706 @@ async function renderWithdrawals() {
                                         <th>订单号</th>
                                         <th>会员</th>
                                         <th>金额</th>
-                                        <th>流水检测</th>
+                                        <th>流水稽核</th>
                                         <th>状态</th>
                                         <th>申请时间</th>
                                         <th>操作</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${list.map(w => `
-                                        <tr>
-                                            <td class="font-mono text-sm">${w.order_no}</td>
-                                            <td>${w.username}</td>
-                                            <td class="text-red-600 font-medium">${formatNumber(w.amount)}</td>
-                                            <td>${w.flow_check ? '<span class="badge badge-success">已达标</span>' : '<span class="badge badge-danger">未达标</span>'}</td>
-                                            <td>${getAuditStatusBadge(w.audit_status)}</td>
-                                            <td>${formatDate(w.created_at)}</td>
-                                            <td>
-                                                <button onclick="auditTransaction(${w.transaction_id}, 'approve')" class="btn btn-success text-xs mr-1">通过</button>
-                                                <button onclick="auditTransaction(${w.transaction_id}, 'reject')" class="btn btn-danger text-xs">拒绝</button>
-                                            </td>
-                                        </tr>
-                                    `).join('')}
+                                    ${list.map(w => {
+                                        // 构建流水检测详细信息
+                                        const flowDetails = [];
+                                        if (w.basic_flow_check === false) flowDetails.push('基础流水未达标');
+                                        if (w.bonus_flow_check === false) flowDetails.push(`红利流水未达标(${w.pending_bonus_count}笔)`);
+                                        const flowTooltip = flowDetails.length ? flowDetails.join(', ') : '全部达标';
+                                        
+                                        return `
+                                            <tr class="${w.flow_check ? '' : 'bg-yellow-50'}">
+                                                <td class="font-mono text-sm">${escapeHtml(w.order_no || '')}</td>
+                                                <td>
+                                                    <div class="font-medium">${escapeHtml(w.username || '')}</div>
+                                                    <div class="text-xs text-gray-500">${escapeHtml(w.nickname || '')}</div>
+                                                </td>
+                                                <td class="text-red-600 font-medium">${formatMoney(w.amount)}</td>
+                                                <td>
+                                                    ${w.flow_check ? 
+                                                        '<span class="badge badge-success"><i class="fas fa-check mr-1"></i>已达标</span>' : 
+                                                        `<span class="badge badge-danger cursor-help" title="${flowTooltip}"><i class="fas fa-times mr-1"></i>未达标</span>`
+                                                    }
+                                                    ${w.pending_bonus_count > 0 ? `
+                                                        <div class="text-xs text-orange-600 mt-1">
+                                                            <i class="fas fa-gift mr-1"></i>${w.pending_bonus_count}笔红利待完成
+                                                            ${w.pending_bonus_turnover > 0 ? `<br>差${formatMoney(w.pending_bonus_turnover)}流水` : ''}
+                                                        </div>
+                                                    ` : ''}
+                                                </td>
+                                                <td>${getAuditStatusBadge(w.audit_status)}</td>
+                                                <td>${formatDate(w.created_at)}</td>
+                                                <td>
+                                                    <div class="flex space-x-1">
+                                                        <button onclick="viewWithdrawalDetail(${w.transaction_id}, ${w.user_id})" class="btn btn-outline text-xs" title="查看详情">
+                                                            <i class="fas fa-eye"></i>
+                                                        </button>
+                                                        <button onclick="auditTransaction(${w.transaction_id}, 'approve')" class="btn btn-success text-xs" ${w.flow_check ? '' : 'title="警告：流水未达标"'}>
+                                                            <i class="fas fa-check mr-1"></i>通过
+                                                        </button>
+                                                        <button onclick="auditTransaction(${w.transaction_id}, 'reject')" class="btn btn-danger text-xs">
+                                                            <i class="fas fa-times mr-1"></i>拒绝
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        `;
+                                    }).join('')}
                                 </tbody>
                             </table>
                         </div>
-                    ` : '<div class="text-center text-gray-500 py-10">暂无待审核提款</div>'}
+                    ` : '<div class="text-center text-gray-500 py-10"><i class="fas fa-inbox mr-2 text-4xl block mb-2"></i>暂无待审核提款</div>'}
                 </div>
             </div>
         `;
     } catch (error) {
         content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+    }
+}
+
+// 查看提款详情（含红利流水状态）
+async function viewWithdrawalDetail(transactionId, userId) {
+    try {
+        // 获取玩家红利流水完成情况
+        const bonusRes = await apiRequest(`/bonus/check-turnover/${userId}`);
+        const { bonuses, summary } = bonusRes.data || { bonuses: [], summary: {} };
+        
+        const bonusTypeMap = {
+            'first_deposit': '首存红利',
+            'deposit_bonus': '存款红利', 
+            'activity': '活动红利',
+            'rebate': '返水红利',
+            'manual': '人工红利'
+        };
+        
+        openModal(`
+            <div class="card-header">
+                <i class="fas fa-eye mr-2 text-blue-500"></i>提款详情 - 流水稽核状态
+            </div>
+            <div class="p-6">
+                <!-- 汇总信息 -->
+                <div class="grid grid-cols-4 gap-4 mb-6">
+                    <div class="bg-blue-50 p-4 rounded-lg text-center">
+                        <div class="text-2xl font-bold text-blue-600">${formatMoney(summary.total_bonus || 0)}</div>
+                        <div class="text-sm text-gray-600">累计获得红利</div>
+                    </div>
+                    <div class="bg-${summary.can_withdraw ? 'green' : 'red'}-50 p-4 rounded-lg text-center">
+                        <div class="text-2xl font-bold text-${summary.can_withdraw ? 'green' : 'red'}-600">
+                            ${summary.can_withdraw ? '可提现' : '不可提现'}
+                        </div>
+                        <div class="text-sm text-gray-600">提现资格</div>
+                    </div>
+                    <div class="bg-orange-50 p-4 rounded-lg text-center">
+                        <div class="text-2xl font-bold text-orange-600">${summary.pending_count || 0}</div>
+                        <div class="text-sm text-gray-600">待完成流水笔数</div>
+                    </div>
+                    <div class="bg-purple-50 p-4 rounded-lg text-center">
+                        <div class="text-2xl font-bold text-purple-600">${formatMoney(summary.pending_turnover || 0)}</div>
+                        <div class="text-sm text-gray-600">剩余流水要求</div>
+                    </div>
+                </div>
+                
+                <!-- 红利列表 -->
+                <div class="border rounded-lg overflow-hidden">
+                    <div class="bg-gray-50 px-4 py-2 font-medium">
+                        <i class="fas fa-gift mr-2"></i>红利流水明细
+                    </div>
+                    ${bonuses.length ? `
+                        <table class="data-table mb-0">
+                            <thead>
+                                <tr>
+                                    <th>红利类型</th>
+                                    <th>金额</th>
+                                    <th>倍率</th>
+                                    <th>需完成</th>
+                                    <th>已完成</th>
+                                    <th>进度</th>
+                                    <th>状态</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${bonuses.map(b => {
+                                    const progress = b.required_turnover > 0 ? Math.min(100, (b.completed_turnover / b.required_turnover * 100)) : 100;
+                                    return `
+                                        <tr>
+                                            <td>${bonusTypeMap[b.bonus_type] || b.bonus_type}</td>
+                                            <td class="text-green-600">${formatMoney(b.bonus_amount)}</td>
+                                            <td>${b.turnover_multiplier}倍</td>
+                                            <td>${formatMoney(b.required_turnover)}</td>
+                                            <td>${formatMoney(b.completed_turnover)}</td>
+                                            <td>
+                                                <div class="w-full bg-gray-200 rounded-full h-2">
+                                                    <div class="bg-${progress >= 100 ? 'green' : 'blue'}-500 h-2 rounded-full" style="width: ${progress}%"></div>
+                                                </div>
+                                                <span class="text-xs text-gray-500">${progress.toFixed(1)}%</span>
+                                            </td>
+                                            <td>
+                                                ${b.turnover_status === 1 ? 
+                                                    '<span class="badge badge-success">已完成</span>' : 
+                                                    '<span class="badge badge-warning">进行中</span>'
+                                                }
+                                            </td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    ` : '<div class="p-4 text-center text-gray-500">无红利记录</div>'}
+                </div>
+                
+                <div class="flex justify-end mt-4">
+                    <button onclick="closeModal()" class="btn btn-outline">关闭</button>
+                </div>
+            </div>
+        `);
+    } catch (error) {
+        alert('获取详情失败: ' + error.message);
+    }
+}
+
+// ==================== 红利派送管理 ====================
+async function renderBonusRecords() {
+    const content = document.getElementById('pageContent');
+    
+    try {
+        const [recordsRes, configsRes, rulesRes] = await Promise.all([
+            apiRequest('/bonus/records'),
+            apiRequest('/bonus/configs'),
+            apiRequest('/finance/turnover-rules')
+        ]);
+        
+        const { list, total } = recordsRes.data;
+        const configs = configsRes.data || [];
+        const rules = rulesRes.data || [];
+        
+        // 存储全局数据供弹窗使用
+        window._bonusConfigs = configs;
+        window._turnoverRules = rules;
+        
+        const bonusTypeMap = {
+            'first_deposit': { label: '首存红利', color: 'green' },
+            'deposit_bonus': { label: '存款红利', color: 'blue' },
+            'activity': { label: '活动红利', color: 'purple' },
+            'rebate': { label: '返水红利', color: 'orange' },
+            'manual': { label: '人工红利', color: 'red' }
+        };
+        
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header flex items-center justify-between">
+                    <span>
+                        <i class="fas fa-gift mr-2 text-pink-500"></i>红利派送管理
+                        <span class="badge badge-primary ml-2">${total || 0} 条</span>
+                    </span>
+                    <div class="flex space-x-2">
+                        <button onclick="showBonusConfigs()" class="btn btn-outline text-sm">
+                            <i class="fas fa-cog mr-1"></i>红利配置
+                        </button>
+                        <button onclick="showSendBonus()" class="btn btn-primary text-sm">
+                            <i class="fas fa-paper-plane mr-1"></i>派送红利
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <!-- 筛选 -->
+                    <div class="flex flex-wrap gap-4 mb-4">
+                        <input type="text" id="bonusSearchUser" placeholder="会员账号" class="px-3 py-2 border rounded-lg w-40">
+                        <select id="bonusFilterType" class="px-3 py-2 border rounded-lg">
+                            <option value="">全部类型</option>
+                            ${Object.entries(bonusTypeMap).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('')}
+                        </select>
+                        <select id="bonusFilterAudit" class="px-3 py-2 border rounded-lg">
+                            <option value="">全部状态</option>
+                            <option value="0">待审核</option>
+                            <option value="1">已通过</option>
+                            <option value="2">已拒绝</option>
+                            <option value="3">已取消</option>
+                        </select>
+                        <select id="bonusFilterTurnover" class="px-3 py-2 border rounded-lg">
+                            <option value="">流水状态</option>
+                            <option value="0">未达标</option>
+                            <option value="1">已达标</option>
+                        </select>
+                        <button onclick="searchBonusRecords()" class="btn btn-primary"><i class="fas fa-search mr-1"></i>查询</button>
+                    </div>
+                    
+                    <!-- 数据表格 -->
+                    <div class="overflow-x-auto">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>会员账号</th>
+                                    <th>红利类型</th>
+                                    <th>红利金额</th>
+                                    <th>流水要求</th>
+                                    <th>已完成流水</th>
+                                    <th>流水状态</th>
+                                    <th>审核状态</th>
+                                    <th>派送时间</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${!list || list.length === 0 ? '<tr><td colspan="10" class="text-center text-gray-500 py-4">暂无红利记录</td></tr>' :
+                                list.map(b => {
+                                    const typeInfo = bonusTypeMap[b.bonus_type] || { label: b.bonus_type, color: 'gray' };
+                                    const progress = b.required_turnover > 0 ? Math.min(100, (b.completed_turnover / b.required_turnover) * 100) : 100;
+                                    return `
+                                        <tr>
+                                            <td>${b.bonus_id}</td>
+                                            <td class="font-medium">${escapeHtml(b.username)}</td>
+                                            <td><span class="badge badge-${typeInfo.color}">${typeInfo.label}</span></td>
+                                            <td class="text-green-600 font-bold">+${formatMoney(b.bonus_amount)}</td>
+                                            <td>${formatMoney(b.required_turnover)}</td>
+                                            <td>
+                                                <div class="flex items-center space-x-2">
+                                                    <div class="w-20 bg-gray-200 rounded-full h-2">
+                                                        <div class="bg-blue-500 h-2 rounded-full" style="width: ${progress}%"></div>
+                                                    </div>
+                                                    <span class="text-xs">${progress.toFixed(0)}%</span>
+                                                </div>
+                                            </td>
+                                            <td>${b.turnover_status === 1 ? '<span class="badge badge-success">已达标</span>' : '<span class="badge badge-warning">未达标</span>'}</td>
+                                            <td>${getBonusAuditBadge(b.audit_status)}</td>
+                                            <td class="text-sm">${formatDate(b.created_at)}</td>
+                                            <td>
+                                                ${b.audit_status === 0 ? `
+                                                    <button onclick="auditBonus(${b.bonus_id}, 'approve')" class="text-green-500 hover:text-green-700 mr-2" title="通过"><i class="fas fa-check"></i></button>
+                                                    <button onclick="auditBonus(${b.bonus_id}, 'reject')" class="text-red-500 hover:text-red-700 mr-2" title="拒绝"><i class="fas fa-times"></i></button>
+                                                ` : ''}
+                                                <button onclick="viewBonusDetail(${b.bonus_id})" class="text-blue-500 hover:text-blue-700" title="详情"><i class="fas fa-eye"></i></button>
+                                            </td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+function getBonusAuditBadge(status) {
+    switch (parseInt(status)) {
+        case 0: return '<span class="badge badge-warning">待审核</span>';
+        case 1: return '<span class="badge badge-success">已通过</span>';
+        case 2: return '<span class="badge badge-danger">已拒绝</span>';
+        case 3: return '<span class="badge badge-info">已取消</span>';
+        default: return '<span class="badge badge-secondary">未知</span>';
+    }
+}
+
+async function searchBonusRecords() {
+    const username = document.getElementById('bonusSearchUser').value;
+    const bonus_type = document.getElementById('bonusFilterType').value;
+    const audit_status = document.getElementById('bonusFilterAudit').value;
+    const turnover_status = document.getElementById('bonusFilterTurnover').value;
+    
+    let url = '/bonus/records?';
+    if (username) url += `username=${encodeURIComponent(username)}&`;
+    if (bonus_type) url += `bonus_type=${bonus_type}&`;
+    if (audit_status !== '') url += `audit_status=${audit_status}&`;
+    if (turnover_status !== '') url += `turnover_status=${turnover_status}&`;
+    
+    try {
+        const res = await apiRequest(url);
+        // 重新渲染表格...
+        renderBonusRecords();
+    } catch (error) {
+        alert('查询失败: ' + error.message);
+    }
+}
+
+function showSendBonus() {
+    const rules = window._turnoverRules || [];
+    
+    openModal(`
+        <div class="card-header"><i class="fas fa-paper-plane mr-2 text-pink-500"></i>派送红利</div>
+        <div class="p-6">
+            <form id="sendBonusForm" class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">会员ID *</label>
+                        <input type="number" id="bonusUserId" required class="form-input w-full" placeholder="玩家ID">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">会员账号 *</label>
+                        <input type="text" id="bonusUsername" required class="form-input w-full" placeholder="玩家账号">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">红利类型 *</label>
+                        <select id="bonusType" required class="form-input w-full">
+                            <option value="">请选择</option>
+                            <option value="first_deposit">首存红利</option>
+                            <option value="deposit_bonus">存款红利</option>
+                            <option value="activity">活动红利</option>
+                            <option value="rebate">返水红利</option>
+                            <option value="manual">人工红利</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">红利金额 *</label>
+                        <input type="number" id="bonusAmount" required step="0.01" min="0.01" class="form-input w-full" placeholder="金额">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">流水稽核规则</label>
+                    <select id="bonusTurnoverRule" class="form-input w-full" onchange="updateBonusTurnoverPreview()">
+                        <option value="">无流水要求</option>
+                        ${rules.filter(r => r.status === 1).map(r => `<option value="${r.rule_id}" data-multiplier="${r.multiplier}">${escapeHtml(r.rule_name)} (${r.multiplier}倍)</option>`).join('')}
+                    </select>
+                    <div id="turnoverPreview" class="mt-2 p-2 bg-yellow-50 rounded text-sm text-yellow-700 hidden">
+                        <i class="fas fa-info-circle mr-1"></i>需完成流水: <span id="turnoverAmount">0</span>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">备注说明</label>
+                    <textarea id="bonusRemark" rows="2" class="form-input w-full" placeholder="派送原因或备注"></textarea>
+                </div>
+                <div class="bg-red-50 p-3 rounded-lg text-sm text-red-700">
+                    <i class="fas fa-exclamation-triangle mr-1"></i>
+                    <strong>重要提示：</strong>红利派送后需经审核才能到账，关联流水规则后玩家需完成流水才能申请提现。
+                </div>
+                <div class="flex justify-end space-x-2 pt-4">
+                    <button type="button" onclick="closeModal()" class="btn btn-outline">取消</button>
+                    <button type="submit" class="btn btn-primary">派送红利</button>
+                </div>
+            </form>
+        </div>
+    `);
+    
+    document.getElementById('sendBonusForm').onsubmit = async (e) => {
+        e.preventDefault();
+        await submitSendBonus();
+    };
+}
+
+function updateBonusTurnoverPreview() {
+    const ruleSelect = document.getElementById('bonusTurnoverRule');
+    const amountInput = document.getElementById('bonusAmount');
+    const preview = document.getElementById('turnoverPreview');
+    const turnoverSpan = document.getElementById('turnoverAmount');
+    
+    const selectedOption = ruleSelect.options[ruleSelect.selectedIndex];
+    const multiplier = parseFloat(selectedOption.dataset?.multiplier || 0);
+    const amount = parseFloat(amountInput.value) || 0;
+    
+    if (multiplier > 0 && amount > 0) {
+        turnoverSpan.textContent = formatMoney(amount * multiplier);
+        preview.classList.remove('hidden');
+    } else {
+        preview.classList.add('hidden');
+    }
+}
+
+async function submitSendBonus() {
+    const data = {
+        user_id: parseInt(document.getElementById('bonusUserId').value),
+        username: document.getElementById('bonusUsername').value,
+        bonus_type: document.getElementById('bonusType').value,
+        bonus_amount: parseFloat(document.getElementById('bonusAmount').value),
+        turnover_rule_id: document.getElementById('bonusTurnoverRule').value ? parseInt(document.getElementById('bonusTurnoverRule').value) : null,
+        remark: document.getElementById('bonusRemark').value || null
+    };
+    
+    try {
+        const res = await apiRequest('/bonus/records', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+        
+        if (res.success) {
+            alert('红利已派送，等待审核');
+            closeModal();
+            renderBonusRecords();
+        } else {
+            alert(res.message || '派送失败');
+        }
+    } catch (error) {
+        alert('派送失败: ' + error.message);
+    }
+}
+
+async function auditBonus(bonusId, action) {
+    const actionText = action === 'approve' ? '通过' : '拒绝';
+    if (!confirm(`确定要${actionText}这笔红利吗？${action === 'approve' ? '通过后红利将立即发放到玩家账户。' : ''}`)) return;
+    
+    try {
+        const res = await apiRequest(`/bonus/records/${bonusId}/audit`, {
+            method: 'PUT',
+            body: JSON.stringify({ action })
+        });
+        
+        if (res.success) {
+            alert(res.message || '操作成功');
+            renderBonusRecords();
+        } else {
+            alert(res.message || '操作失败');
+        }
+    } catch (error) {
+        alert('操作失败: ' + error.message);
+    }
+}
+
+async function viewBonusDetail(bonusId) {
+    try {
+        const res = await apiRequest(`/bonus/records/${bonusId}`);
+        const b = res.data;
+        
+        const bonusTypeMap = {
+            'first_deposit': '首存红利',
+            'deposit_bonus': '存款红利',
+            'activity': '活动红利',
+            'rebate': '返水红利',
+            'manual': '人工红利'
+        };
+        
+        const progress = b.required_turnover > 0 ? Math.min(100, (b.completed_turnover / b.required_turnover) * 100) : 100;
+        
+        openModal(`
+            <div class="card-header"><i class="fas fa-gift mr-2 text-pink-500"></i>红利详情 #${b.bonus_id}</div>
+            <div class="p-6">
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div class="bg-gray-50 p-3 rounded">
+                        <div class="text-sm text-gray-500">会员账号</div>
+                        <div class="font-bold">${escapeHtml(b.username)}</div>
+                    </div>
+                    <div class="bg-gray-50 p-3 rounded">
+                        <div class="text-sm text-gray-500">红利类型</div>
+                        <div class="font-bold">${bonusTypeMap[b.bonus_type] || b.bonus_type}</div>
+                    </div>
+                    <div class="bg-green-50 p-3 rounded">
+                        <div class="text-sm text-gray-500">红利金额</div>
+                        <div class="font-bold text-green-600">+${formatMoney(b.bonus_amount)}</div>
+                    </div>
+                    <div class="bg-blue-50 p-3 rounded">
+                        <div class="text-sm text-gray-500">玩家当前余额</div>
+                        <div class="font-bold text-blue-600">${formatMoney(b.user_balance || 0)}</div>
+                    </div>
+                </div>
+                
+                <div class="border rounded-lg p-4 mb-4">
+                    <h4 class="font-semibold mb-3"><i class="fas fa-sync-alt mr-1 text-orange-500"></i>流水稽核</h4>
+                    <div class="grid grid-cols-3 gap-4 text-center mb-3">
+                        <div>
+                            <div class="text-sm text-gray-500">流水倍数</div>
+                            <div class="text-xl font-bold text-orange-600">${b.turnover_multiplier || 1}x</div>
+                        </div>
+                        <div>
+                            <div class="text-sm text-gray-500">需要流水</div>
+                            <div class="text-xl font-bold">${formatMoney(b.required_turnover)}</div>
+                        </div>
+                        <div>
+                            <div class="text-sm text-gray-500">已完成</div>
+                            <div class="text-xl font-bold text-blue-600">${formatMoney(b.completed_turnover)}</div>
+                        </div>
+                    </div>
+                    <div class="w-full bg-gray-200 rounded-full h-4">
+                        <div class="bg-gradient-to-r from-orange-400 to-green-500 h-4 rounded-full transition-all" style="width: ${progress}%"></div>
+                    </div>
+                    <div class="text-center mt-2">
+                        ${b.turnover_status === 1 ? 
+                            '<span class="text-green-600 font-bold"><i class="fas fa-check-circle mr-1"></i>流水已达标，可申请提现</span>' : 
+                            `<span class="text-orange-600">还需完成流水: ${formatMoney(b.required_turnover - b.completed_turnover)}</span>`
+                        }
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4 text-sm">
+                    <div><span class="text-gray-500">关联规则:</span> ${escapeHtml(b.turnover_rule_name || '无')}</div>
+                    <div><span class="text-gray-500">审核状态:</span> ${getBonusAuditBadge(b.audit_status)}</div>
+                    <div><span class="text-gray-500">派送人:</span> ${escapeHtml(b.admin_username || '-')}</div>
+                    <div><span class="text-gray-500">过期时间:</span> ${b.expires_at ? formatDate(b.expires_at) : '永不过期'}</div>
+                    <div class="col-span-2"><span class="text-gray-500">备注:</span> ${escapeHtml(b.remark || '无')}</div>
+                    <div><span class="text-gray-500">派送时间:</span> ${formatDate(b.created_at)}</div>
+                    <div><span class="text-gray-500">审核时间:</span> ${b.approved_at ? formatDate(b.approved_at) : '-'}</div>
+                </div>
+                
+                <div class="flex justify-end mt-6">
+                    <button onclick="closeModal()" class="btn btn-outline">关闭</button>
+                </div>
+            </div>
+        `);
+    } catch (error) {
+        alert('获取详情失败: ' + error.message);
+    }
+}
+
+async function showBonusConfigs() {
+    try {
+        const [configsRes, rulesRes] = await Promise.all([
+            apiRequest('/bonus/configs'),
+            apiRequest('/finance/turnover-rules')
+        ]);
+        
+        const configs = configsRes.data || [];
+        const rules = rulesRes.data || [];
+        
+        const bonusTypeMap = {
+            'first_deposit': { label: '首存红利', color: 'green' },
+            'deposit_bonus': { label: '存款红利', color: 'blue' },
+            'activity': { label: '活动红利', color: 'purple' },
+            'rebate': { label: '返水红利', color: 'orange' },
+            'manual': { label: '人工红利', color: 'red' }
+        };
+        
+        openModal(`
+            <div class="card-header"><i class="fas fa-cog mr-2 text-gray-500"></i>红利配置管理</div>
+            <div class="p-6 max-h-[70vh] overflow-y-auto">
+                <div class="space-y-4">
+                    ${configs.map(c => {
+                        const typeInfo = bonusTypeMap[c.bonus_type] || { label: c.bonus_type, color: 'gray' };
+                        return `
+                            <div class="border rounded-lg p-4">
+                                <div class="flex items-center justify-between mb-3">
+                                    <div>
+                                        <span class="badge badge-${typeInfo.color}">${typeInfo.label}</span>
+                                        <span class="font-semibold ml-2">${escapeHtml(c.bonus_name)}</span>
+                                    </div>
+                                    <span class="${c.status === 1 ? 'text-green-500' : 'text-red-500'}">
+                                        <i class="fas fa-circle text-xs mr-1"></i>${c.status === 1 ? '启用' : '禁用'}
+                                    </span>
+                                </div>
+                                <div class="grid grid-cols-4 gap-4 text-sm">
+                                    <div><span class="text-gray-500">最低存款:</span> ¥${formatNumber(c.min_deposit)}</div>
+                                    <div><span class="text-gray-500">红利上限:</span> ¥${formatNumber(c.max_bonus)}</div>
+                                    <div><span class="text-gray-500">红利比例:</span> ${c.bonus_percentage}%</div>
+                                    <div><span class="text-gray-500">有效天数:</span> ${c.valid_days}天</div>
+                                </div>
+                                <div class="mt-2 text-sm text-gray-500">${escapeHtml(c.description || '无描述')}</div>
+                                <div class="mt-3 flex justify-end">
+                                    <button onclick="editBonusConfig(${c.config_id})" class="btn btn-outline text-sm"><i class="fas fa-edit mr-1"></i>编辑</button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+                <div class="flex justify-end mt-6">
+                    <button onclick="closeModal()" class="btn btn-outline">关闭</button>
+                </div>
+            </div>
+        `, '800px');
+    } catch (error) {
+        alert('获取配置失败: ' + error.message);
+    }
+}
+
+async function editBonusConfig(configId) {
+    try {
+        const [configsRes, rulesRes] = await Promise.all([
+            apiRequest('/bonus/configs'),
+            apiRequest('/finance/turnover-rules')
+        ]);
+        
+        const configs = configsRes.data || [];
+        const rules = rulesRes.data || [];
+        const config = configs.find(c => c.config_id === configId);
+        
+        if (!config) {
+            alert('配置不存在');
+            return;
+        }
+        
+        openModal(`
+            <div class="card-header"><i class="fas fa-edit mr-2 text-blue-500"></i>编辑红利配置</div>
+            <div class="p-6">
+                <form id="editBonusConfigForm" class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">红利名称</label>
+                            <input type="text" id="configBonusName" value="${escapeAttr(config.bonus_name)}" class="form-input w-full">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">有效天数</label>
+                            <input type="number" id="configValidDays" value="${config.valid_days}" class="form-input w-full">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">最低存款</label>
+                            <input type="number" id="configMinDeposit" value="${config.min_deposit}" step="0.01" class="form-input w-full">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">红利上限</label>
+                            <input type="number" id="configMaxBonus" value="${config.max_bonus}" step="0.01" class="form-input w-full">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">红利比例(%)</label>
+                            <input type="number" id="configPercentage" value="${config.bonus_percentage}" step="0.01" class="form-input w-full">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">关联流水规则</label>
+                        <select id="configTurnoverRule" class="form-input w-full">
+                            <option value="">无流水要求</option>
+                            ${rules.filter(r => r.status === 1).map(r => `<option value="${r.rule_id}" ${config.turnover_rule_id === r.rule_id ? 'selected' : ''}>${escapeHtml(r.rule_name)} (${r.multiplier}倍)</option>`).join('')}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">描述说明</label>
+                        <textarea id="configDescription" rows="2" class="form-input w-full">${escapeHtml(config.description || '')}</textarea>
+                    </div>
+                    <div class="flex items-center">
+                        <input type="checkbox" id="configStatus" ${config.status === 1 ? 'checked' : ''} class="mr-2">
+                        <label for="configStatus" class="text-sm">启用此红利类型</label>
+                    </div>
+                    <div class="flex justify-end space-x-2 pt-4">
+                        <button type="button" onclick="showBonusConfigs()" class="btn btn-outline">返回</button>
+                        <button type="submit" class="btn btn-primary">保存</button>
+                    </div>
+                </form>
+            </div>
+        `);
+        
+        document.getElementById('editBonusConfigForm').onsubmit = async (e) => {
+            e.preventDefault();
+            await submitBonusConfig(configId);
+        };
+    } catch (error) {
+        alert('获取配置失败: ' + error.message);
+    }
+}
+
+async function submitBonusConfig(configId) {
+    const data = {
+        bonus_name: document.getElementById('configBonusName').value,
+        valid_days: parseInt(document.getElementById('configValidDays').value),
+        min_deposit: parseFloat(document.getElementById('configMinDeposit').value),
+        max_bonus: parseFloat(document.getElementById('configMaxBonus').value),
+        bonus_percentage: parseFloat(document.getElementById('configPercentage').value),
+        turnover_rule_id: document.getElementById('configTurnoverRule').value ? parseInt(document.getElementById('configTurnoverRule').value) : null,
+        description: document.getElementById('configDescription').value,
+        status: document.getElementById('configStatus').checked ? 1 : 0
+    };
+    
+    try {
+        const res = await apiRequest(`/bonus/configs/${configId}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+        
+        if (res.success) {
+            alert('配置已保存');
+            showBonusConfigs();
+        } else {
+            alert(res.message || '保存失败');
+        }
+    } catch (error) {
+        alert('保存失败: ' + error.message);
     }
 }
 

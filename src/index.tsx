@@ -1267,21 +1267,53 @@ app.get('/api/v1/finance/deposits', async (c) => {
   }
 })
 
-// 待审核提款
+// 待审核提款 - 包含红利流水稽核检查
 app.get('/api/v1/finance/withdrawals', async (c) => {
   try {
+    // 获取待审核提款列表
     const result = await c.env.DB.prepare(`
       SELECT t.*, u.username, u.nickname, u.balance as current_balance,
              u.total_bet, u.total_deposit,
-             CASE WHEN u.total_bet >= u.total_deposit * 1 THEN 1 ELSE 0 END as flow_check,
              u.bank_name, u.bank_account
       FROM transactions t
       LEFT JOIN users u ON t.user_id = u.user_id
       WHERE t.transaction_type = 2 AND t.audit_status = 0
       ORDER BY t.created_at DESC
     `).all()
+    
+    const withdrawals = result.results || []
+    
+    // 为每个提款检查红利流水完成情况
+    const enhancedWithdrawals = await Promise.all(withdrawals.map(async (w: any) => {
+      // 检查是否有未完成流水的红利
+      const pendingBonuses = await c.env.DB.prepare(`
+        SELECT SUM(required_turnover - completed_turnover) as pending_turnover,
+               COUNT(*) as pending_count
+        FROM bonus_records 
+        WHERE user_id = ? 
+          AND audit_status = 1 
+          AND turnover_status = 0 
+          AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+      `).bind(w.user_id).first()
+      
+      // 基础流水检查：总投注 >= 总存款
+      const basicFlowCheck = w.total_bet >= w.total_deposit
+      // 红利流水检查：无未完成的红利流水
+      const bonusFlowCheck = !pendingBonuses?.pending_count || pendingBonuses.pending_count === 0
+      // 综合判断：两者都满足才能提款
+      const canWithdraw = basicFlowCheck && bonusFlowCheck
+      
+      return {
+        ...w,
+        flow_check: canWithdraw ? 1 : 0,
+        basic_flow_check: basicFlowCheck,
+        bonus_flow_check: bonusFlowCheck,
+        pending_bonus_count: pendingBonuses?.pending_count || 0,
+        pending_bonus_turnover: pendingBonuses?.pending_turnover || 0
+      }
+    }))
 
-    return c.json({ success: true, data: result.results || [] })
+    return c.json({ success: true, data: enhancedWithdrawals })
   } catch (error) {
     return c.json({ success: false, message: '获取提款列表失败' }, 500)
   }
@@ -1566,6 +1598,281 @@ app.get('/api/v1/finance/turnover-audit/:user_id', async (c) => {
     })
   } catch (error) {
     return c.json({ success: false, message: '获取流水稽核失败' }, 500)
+  }
+})
+
+// ==================== 红利派送API ====================
+
+// 获取红利配置列表
+app.get('/api/v1/bonus/configs', async (c) => {
+  try {
+    const result = await c.env.DB.prepare(`
+      SELECT bc.*, tr.rule_name as turnover_rule_name
+      FROM bonus_configs bc
+      LEFT JOIN turnover_rules tr ON bc.turnover_rule_id = tr.rule_id
+      ORDER BY bc.config_id
+    `).all()
+    return c.json({ success: true, data: result.results || [] })
+  } catch (error) {
+    return c.json({ success: false, message: '获取红利配置失败' }, 500)
+  }
+})
+
+// 更新红利配置
+app.put('/api/v1/bonus/configs/:config_id', async (c) => {
+  const config_id = parseInt(c.req.param('config_id'))
+  const { bonus_name, description, min_deposit, max_bonus, bonus_percentage, turnover_rule_id, valid_days, status } = await c.req.json()
+  
+  try {
+    await c.env.DB.prepare(`
+      UPDATE bonus_configs SET 
+        bonus_name = COALESCE(?, bonus_name),
+        description = COALESCE(?, description),
+        min_deposit = COALESCE(?, min_deposit),
+        max_bonus = COALESCE(?, max_bonus),
+        bonus_percentage = COALESCE(?, bonus_percentage),
+        turnover_rule_id = ?,
+        valid_days = COALESCE(?, valid_days),
+        status = COALESCE(?, status),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE config_id = ?
+    `).bind(bonus_name, description, min_deposit, max_bonus, bonus_percentage, turnover_rule_id, valid_days, status, config_id).run()
+    
+    return c.json({ success: true, message: '配置已更新' })
+  } catch (error) {
+    return c.json({ success: false, message: '更新配置失败' }, 500)
+  }
+})
+
+// 获取红利记录列表
+app.get('/api/v1/bonus/records', async (c) => {
+  const { page, size } = validatePagination(c.req.query('page'), c.req.query('size'))
+  const bonus_type = c.req.query('bonus_type')
+  const audit_status = c.req.query('audit_status')
+  const turnover_status = c.req.query('turnover_status')
+  const username = c.req.query('username')
+  const offset = (page - 1) * size
+
+  try {
+    let where = 'WHERE 1=1'
+    const params: any[] = []
+    
+    if (bonus_type) {
+      where += ' AND br.bonus_type = ?'
+      params.push(bonus_type)
+    }
+    if (audit_status !== undefined && audit_status !== '') {
+      where += ' AND br.audit_status = ?'
+      params.push(parseInt(audit_status))
+    }
+    if (turnover_status !== undefined && turnover_status !== '') {
+      where += ' AND br.turnover_status = ?'
+      params.push(parseInt(turnover_status))
+    }
+    if (username) {
+      where += ' AND br.username LIKE ?'
+      params.push(`%${username}%`)
+    }
+    
+    const countResult = await c.env.DB.prepare(`SELECT COUNT(*) as total FROM bonus_records br ${where}`).bind(...params).first()
+    const total = countResult?.total || 0
+    
+    const result = await c.env.DB.prepare(`
+      SELECT br.*, tr.rule_name as turnover_rule_name
+      FROM bonus_records br
+      LEFT JOIN turnover_rules tr ON br.turnover_rule_id = tr.rule_id
+      ${where}
+      ORDER BY br.created_at DESC
+      LIMIT ? OFFSET ?
+    `).bind(...params, size, offset).all()
+    
+    return c.json({ 
+      success: true, 
+      data: {
+        list: result.results || [],
+        total,
+        page,
+        size
+      }
+    })
+  } catch (error) {
+    return c.json({ success: false, message: '获取红利记录失败' }, 500)
+  }
+})
+
+// 派送红利
+app.post('/api/v1/bonus/records', async (c) => {
+  const adminPayload = c.get('adminPayload')
+  const { user_id, username, bonus_type, bonus_amount, turnover_rule_id, remark } = await c.req.json()
+  
+  if (!user_id || !username || !bonus_type || !bonus_amount) {
+    return c.json({ success: false, message: '参数不完整' }, 400)
+  }
+  
+  try {
+    // 获取流水规则
+    let turnoverMultiplier = 1
+    let validDays = 30
+    
+    if (turnover_rule_id) {
+      const rule = await c.env.DB.prepare('SELECT * FROM turnover_rules WHERE rule_id = ?').bind(turnover_rule_id).first()
+      if (rule) {
+        turnoverMultiplier = rule.multiplier || 1
+        validDays = rule.valid_days || 30
+      }
+    }
+    
+    const requiredTurnover = bonus_amount * turnoverMultiplier
+    const expiresAt = new Date(Date.now() + validDays * 24 * 60 * 60 * 1000).toISOString()
+    
+    const result = await c.env.DB.prepare(`
+      INSERT INTO bonus_records (user_id, username, bonus_type, bonus_amount, turnover_rule_id, turnover_multiplier, required_turnover, remark, admin_id, admin_username, audit_status, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+    `).bind(user_id, username, bonus_type, bonus_amount, turnover_rule_id, turnoverMultiplier, requiredTurnover, remark, adminPayload.admin_id, adminPayload.username, expiresAt).run()
+    
+    return c.json({ success: true, message: '红利已派送，等待审核', bonus_id: result.meta.last_row_id })
+  } catch (error) {
+    return c.json({ success: false, message: '派送红利失败' }, 500)
+  }
+})
+
+// 审核红利
+app.put('/api/v1/bonus/records/:bonus_id/audit', async (c) => {
+  const bonus_id = parseInt(c.req.param('bonus_id'))
+  const adminPayload = c.get('adminPayload')
+  const { action, remark } = await c.req.json() // action: approve/reject/cancel
+  
+  try {
+    const bonus = await c.env.DB.prepare('SELECT * FROM bonus_records WHERE bonus_id = ?').bind(bonus_id).first()
+    if (!bonus) {
+      return c.json({ success: false, message: '红利记录不存在' }, 404)
+    }
+    
+    let newStatus = 0
+    if (action === 'approve') {
+      newStatus = 1
+      // 审核通过后，给玩家账户加红利
+      await c.env.DB.prepare(`
+        UPDATE users SET balance = balance + ? WHERE user_id = ?
+      `).bind(bonus.bonus_amount, bonus.user_id).run()
+      
+      // 记录交易
+      await c.env.DB.prepare(`
+        INSERT INTO transactions (user_id, transaction_type, amount, balance_before, balance_after, remark, audit_status, created_at)
+        SELECT user_id, 5, ?, balance - ?, balance, ?, 1, CURRENT_TIMESTAMP FROM users WHERE user_id = ?
+      `).bind(bonus.bonus_amount, bonus.bonus_amount, `红利派送: ${bonus.bonus_type}`, bonus.user_id).run()
+      
+    } else if (action === 'reject') {
+      newStatus = 2
+    } else if (action === 'cancel') {
+      newStatus = 3
+    }
+    
+    await c.env.DB.prepare(`
+      UPDATE bonus_records SET 
+        audit_status = ?,
+        remark = COALESCE(?, remark),
+        approved_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE approved_at END,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE bonus_id = ?
+    `).bind(newStatus, remark, newStatus, bonus_id).run()
+    
+    return c.json({ success: true, message: action === 'approve' ? '红利已发放' : action === 'reject' ? '红利已拒绝' : '红利已取消' })
+  } catch (error) {
+    return c.json({ success: false, message: '审核失败' }, 500)
+  }
+})
+
+// 检查玩家红利流水完成情况
+app.get('/api/v1/bonus/check-turnover/:user_id', async (c) => {
+  const user_id = parseInt(c.req.param('user_id'))
+  
+  try {
+    // 获取玩家所有未完成流水的红利
+    const bonuses = await c.env.DB.prepare(`
+      SELECT * FROM bonus_records 
+      WHERE user_id = ? AND audit_status = 1 AND turnover_status = 0 AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+      ORDER BY created_at ASC
+    `).bind(user_id).all()
+    
+    // 获取玩家在红利派送后的投注总额
+    const pendingBonuses = bonuses.results || []
+    let allCompleted = true
+    
+    for (const bonus of pendingBonuses) {
+      // 计算该红利派送后的有效投注
+      const betsResult = await c.env.DB.prepare(`
+        SELECT COALESCE(SUM(valid_bet_amount), 0) as completed
+        FROM bets 
+        WHERE user_id = ? AND created_at >= ? AND bet_status = 1
+      `).bind(user_id, bonus.created_at).first()
+      
+      const completed = betsResult?.completed || 0
+      
+      // 更新完成流水
+      await c.env.DB.prepare(`
+        UPDATE bonus_records SET 
+          completed_turnover = ?,
+          turnover_status = CASE WHEN ? >= required_turnover THEN 1 ELSE 0 END,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE bonus_id = ?
+      `).bind(completed, completed, bonus.bonus_id).run()
+      
+      if (completed < bonus.required_turnover) {
+        allCompleted = false
+      }
+    }
+    
+    // 获取更新后的红利状态
+    const updatedBonuses = await c.env.DB.prepare(`
+      SELECT * FROM bonus_records 
+      WHERE user_id = ? AND audit_status = 1
+      ORDER BY created_at DESC
+      LIMIT 20
+    `).bind(user_id).all()
+    
+    // 汇总
+    const summary = (updatedBonuses.results || []).reduce((acc: any, b: any) => {
+      if (b.turnover_status === 0) {
+        acc.pending_count++
+        acc.pending_turnover += (b.required_turnover - b.completed_turnover)
+      }
+      acc.total_bonus += b.bonus_amount
+      return acc
+    }, { pending_count: 0, pending_turnover: 0, total_bonus: 0, can_withdraw: allCompleted })
+    
+    return c.json({ 
+      success: true, 
+      data: {
+        bonuses: updatedBonuses.results || [],
+        summary
+      }
+    })
+  } catch (error) {
+    return c.json({ success: false, message: '检查流水失败' }, 500)
+  }
+})
+
+// 获取单个红利详情
+app.get('/api/v1/bonus/records/:bonus_id', async (c) => {
+  const bonus_id = parseInt(c.req.param('bonus_id'))
+  
+  try {
+    const bonus = await c.env.DB.prepare(`
+      SELECT br.*, tr.rule_name as turnover_rule_name, u.balance as user_balance
+      FROM bonus_records br
+      LEFT JOIN turnover_rules tr ON br.turnover_rule_id = tr.rule_id
+      LEFT JOIN users u ON br.user_id = u.user_id
+      WHERE br.bonus_id = ?
+    `).bind(bonus_id).first()
+    
+    if (!bonus) {
+      return c.json({ success: false, message: '红利记录不存在' }, 404)
+    }
+    
+    return c.json({ success: true, data: bonus })
+  } catch (error) {
+    return c.json({ success: false, message: '获取红利详情失败' }, 500)
   }
 })
 
