@@ -6,12 +6,182 @@ let currentPage = 'dashboard';
 let dashboardCharts = {};
 const API_BASE = '/api/v1';
 
+// ==================== 菜单配置 ====================
+const menuConfig = [
+    { 
+        id: 'dashboard', 
+        icon: 'fa-tachometer-alt', 
+        title: 'DASHBOARD', 
+        page: 'dashboard' 
+    },
+    { 
+        id: 'players', 
+        icon: 'fa-users', 
+        title: '会员管理',
+        children: [
+            { id: 'players', title: '玩家讯息', page: 'players' },
+            { id: 'players-online', title: '玩家在线', page: 'players-online' },
+            { id: 'players-stats', title: '玩家统计', page: 'players-stats' }
+        ]
+    },
+    { 
+        id: 'agents', 
+        icon: 'fa-sitemap', 
+        title: '层级管理',
+        children: [
+            { id: 'agents', title: '代理管理', page: 'agents' },
+            { id: 'agents-tree', title: '层级结构', page: 'agents-tree' }
+        ]
+    },
+    { 
+        id: 'finance', 
+        icon: 'fa-wallet', 
+        title: '财务管理',
+        children: [
+            { id: 'finance-transactions', title: '账户明细', page: 'finance-transactions' },
+            { id: 'finance-deposits', title: '存款申请', page: 'finance-deposits' },
+            { id: 'finance-withdrawals', title: '取款申请', page: 'finance-withdrawals' }
+        ]
+    },
+    { 
+        id: 'bets', 
+        icon: 'fa-list-alt', 
+        title: '注单管理', 
+        page: 'bets' 
+    },
+    { 
+        id: 'commission', 
+        icon: 'fa-percentage', 
+        title: '洗码管理',
+        badge: 'V2.1',
+        children: [
+            { id: 'commission-schemes', title: '洗码方案', page: 'commission-schemes' },
+            { id: 'commission-records', title: '洗码记录', page: 'commission-records' }
+        ]
+    },
+    { 
+        id: 'risk', 
+        icon: 'fa-shield-alt', 
+        title: '风控管理', 
+        page: 'risk-alerts' 
+    },
+    { 
+        id: 'reports', 
+        icon: 'fa-chart-bar', 
+        title: '报表中心',
+        children: [
+            { id: 'reports-settlement', title: '结算报表', page: 'reports-settlement' },
+            { id: 'reports-ranking', title: '盈亏排行', page: 'reports-ranking' }
+        ]
+    },
+    { 
+        id: 'cms', 
+        icon: 'fa-bullhorn', 
+        title: '内容管理', 
+        page: 'announcements' 
+    },
+    { 
+        id: 'system', 
+        icon: 'fa-cogs', 
+        title: '系统控制',
+        children: [
+            { id: 'system-admins', title: '账号管理', page: 'system-admins' },
+            { id: 'system-logs', title: '操作日志', page: 'system-logs' }
+        ]
+    },
+    { 
+        id: 'studio', 
+        icon: 'fa-video', 
+        title: '现场运营',
+        badge: 'NEW',
+        children: [
+            { id: 'studio-dealers', title: '荷官档案', page: 'studio-dealers' },
+            { id: 'studio-tables', title: '桌台管理', page: 'studio-tables' },
+            { id: 'studio-shifts', title: '智能排班', page: 'studio-shifts' }
+        ]
+    }
+];
+
 // ==================== 初始化 ====================
 document.addEventListener('DOMContentLoaded', () => {
     checkAuth();
+    renderSidebarMenu();
     initNavigation();
     loadPage('dashboard');
+    loadNotificationBadges();
 });
+
+// 渲染侧边栏菜单
+function renderSidebarMenu() {
+    const nav = document.getElementById('sidebarNav');
+    if (!nav) return;
+    
+    let html = '';
+    menuConfig.forEach(item => {
+        if (item.children) {
+            html += `
+                <div class="sidebar-menu-item">
+                    <a href="javascript:void(0)" onclick="toggleSubmenu(this)">
+                        <i class="fas ${item.icon}"></i>
+                        <span class="sidebar-text">${item.title}</span>
+                        ${item.badge ? `<span class="badge badge-${item.badge === 'NEW' ? 'success' : 'info'} ml-2 text-xs">${item.badge}</span>` : ''}
+                        <i class="fas fa-chevron-down sidebar-arrow ml-auto"></i>
+                    </a>
+                    <div class="submenu">
+                        ${item.children.map(child => `
+                            <a href="#${child.page}" data-page="${child.page}">${child.title}</a>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="sidebar-menu-item" data-menu="${item.id}">
+                    <a href="#${item.page}" data-page="${item.page}">
+                        <i class="fas ${item.icon}"></i>
+                        <span class="sidebar-text">${item.title}</span>
+                    </a>
+                </div>
+            `;
+        }
+    });
+    
+    nav.innerHTML = html;
+}
+
+// 加载通知徽章
+async function loadNotificationBadges() {
+    try {
+        const stats = await apiRequest('/dashboard/stats');
+        if (stats.success && stats.data) {
+            const { pendingDeposit, pendingWithdraw, pendingAlerts } = stats.data;
+            
+            if (pendingDeposit > 0) {
+                const badge = document.getElementById('depositBadge');
+                if (badge) {
+                    badge.textContent = pendingDeposit;
+                    badge.classList.remove('hidden');
+                }
+            }
+            if (pendingWithdraw > 0) {
+                const badge = document.getElementById('withdrawBadge');
+                if (badge) {
+                    badge.textContent = pendingWithdraw;
+                    badge.classList.remove('hidden');
+                }
+            }
+            if (pendingAlerts > 0) {
+                const badge = document.getElementById('alertBadge');
+                if (badge) {
+                    badge.textContent = pendingAlerts;
+                    badge.classList.remove('hidden');
+                }
+            }
+        }
+    } catch (e) {
+        console.log('Failed to load notification badges');
+    }
+}
 
 // 检查认证
 function checkAuth() {
