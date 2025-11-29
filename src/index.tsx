@@ -3162,6 +3162,124 @@ app.get('/api/v1/reports/agent-performance', async (c) => {
   }
 })
 
+// 转账记录报表
+app.get('/api/v1/reports/transfers', async (c) => {
+  const start_date = c.req.query('start_date') || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  const end_date = c.req.query('end_date') || new Date().toISOString().split('T')[0]
+  const from_username = c.req.query('from_username') || ''
+  const to_username = c.req.query('to_username') || ''
+  const transfer_type = c.req.query('transfer_type') || ''
+  const page = parseInt(c.req.query('page') || '1')
+  const pageSize = parseInt(c.req.query('pageSize') || '50')
+
+  try {
+    // 构建查询条件
+    let whereClause = "WHERE DATE(created_at) BETWEEN ? AND ?"
+    const params: any[] = [start_date, end_date]
+    
+    if (from_username) {
+      whereClause += " AND from_username LIKE ?"
+      params.push(`%${from_username}%`)
+    }
+    if (to_username) {
+      whereClause += " AND to_username LIKE ?"
+      params.push(`%${to_username}%`)
+    }
+    if (transfer_type) {
+      whereClause += " AND transfer_type = ?"
+      params.push(transfer_type)
+    }
+
+    // 获取总数
+    const countResult = await c.env.DB.prepare(`
+      SELECT COUNT(*) as total FROM transfer_records ${whereClause}
+    `).bind(...params).first()
+
+    // 获取列表数据
+    const offset = (page - 1) * pageSize
+    const listResult = await c.env.DB.prepare(`
+      SELECT * FROM transfer_records 
+      ${whereClause}
+      ORDER BY created_at DESC
+      LIMIT ? OFFSET ?
+    `).bind(...params, pageSize, offset).all()
+
+    // 获取汇总数据
+    const summaryResult = await c.env.DB.prepare(`
+      SELECT 
+        COUNT(*) as total_count,
+        COALESCE(SUM(amount), 0) as total_amount,
+        COALESCE(SUM(fee), 0) as total_fee,
+        COALESCE(SUM(actual_amount), 0) as total_actual,
+        COUNT(DISTINCT from_user_id) as unique_senders,
+        COUNT(DISTINCT to_user_id) as unique_receivers,
+        SUM(CASE WHEN transfer_type = 'member' THEN 1 ELSE 0 END) as member_count,
+        SUM(CASE WHEN transfer_type = 'agent' THEN 1 ELSE 0 END) as agent_count
+      FROM transfer_records ${whereClause}
+    `).bind(...params).first()
+
+    return c.json({ 
+      success: true, 
+      data: {
+        list: listResult.results || [],
+        total: countResult?.total || 0,
+        page,
+        pageSize,
+        summary: summaryResult || {}
+      }
+    })
+  } catch (error) {
+    return c.json({ success: false, message: '获取转账记录失败' }, 500)
+  }
+})
+
+// 转账记录统计 - 按日期汇总
+app.get('/api/v1/reports/transfers/summary', async (c) => {
+  const start_date = c.req.query('start_date') || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  const end_date = c.req.query('end_date') || new Date().toISOString().split('T')[0]
+
+  try {
+    const result = await c.env.DB.prepare(`
+      SELECT 
+        DATE(created_at) as transfer_date,
+        COUNT(*) as transfer_count,
+        COALESCE(SUM(amount), 0) as total_amount,
+        COALESCE(SUM(fee), 0) as total_fee,
+        COUNT(DISTINCT from_user_id) as unique_senders,
+        COUNT(DISTINCT to_user_id) as unique_receivers,
+        SUM(CASE WHEN transfer_type = 'member' THEN amount ELSE 0 END) as member_amount,
+        SUM(CASE WHEN transfer_type = 'agent' THEN amount ELSE 0 END) as agent_amount
+      FROM transfer_records
+      WHERE DATE(created_at) BETWEEN ? AND ?
+      GROUP BY DATE(created_at)
+      ORDER BY transfer_date DESC
+    `).bind(start_date, end_date).all()
+
+    return c.json({ success: true, data: result.results || [] })
+  } catch (error) {
+    return c.json({ success: false, message: '获取转账统计失败' }, 500)
+  }
+})
+
+// 转账记录详情
+app.get('/api/v1/reports/transfers/:transfer_id', async (c) => {
+  const transfer_id = parseInt(c.req.param('transfer_id'))
+
+  try {
+    const record = await c.env.DB.prepare(`
+      SELECT * FROM transfer_records WHERE transfer_id = ?
+    `).bind(transfer_id).first()
+
+    if (!record) {
+      return c.json({ success: false, message: '转账记录不存在' }, 404)
+    }
+
+    return c.json({ success: true, data: record })
+  } catch (error) {
+    return c.json({ success: false, message: '获取转账详情失败' }, 500)
+  }
+})
+
 // 盈亏日报
 app.get('/api/v1/reports/daily', async (c) => {
   const start_date = c.req.query('start_date') || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]

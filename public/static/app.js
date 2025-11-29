@@ -115,7 +115,8 @@ const menuConfig = [
             { id: 'reports-ranking', title: '盈亏排行', page: 'reports-ranking' },
             { id: 'reports-game', title: '游戏报表', page: 'reports-game' },
             { id: 'reports-daily', title: '盈亏日报', page: 'reports-daily' },
-            { id: 'reports-agent', title: '代理业绩', page: 'reports-agent' }
+            { id: 'reports-agent', title: '代理业绩', page: 'reports-agent' },
+            { id: 'reports-transfer', title: '转账记录', page: 'reports-transfer', badge: 'NEW' }
         ]
     },
     { 
@@ -315,6 +316,7 @@ function loadPage(page) {
         'reports-game': { title: '游戏报表', handler: renderGameReport },
         'reports-daily': { title: '盈亏日报', handler: renderDailyReport },
         'reports-agent': { title: '代理业绩', handler: renderAgentPerformance },
+        'reports-transfer': { title: '转账记录', handler: renderTransferRecords },
         'announcements': { title: '公告管理', handler: renderAnnouncements },
         'system-admins': { title: '账号管理', handler: renderAdmins },
         'system-roles': { title: '角色权限', handler: renderRolesEnhanced },
@@ -4962,6 +4964,310 @@ function exportAgent() {
     ], '代理业绩');
 }
 
+// ==================== 转账记录报表 ====================
+async function renderTransferRecords() {
+    const content = document.getElementById('pageContent');
+    
+    content.innerHTML = `
+        <div class="card">
+            <div class="card-header flex flex-col gap-3">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-lg font-semibold">
+                        <i class="fas fa-exchange-alt mr-2 text-purple-500"></i>转账记录报表
+                        <span class="badge badge-purple ml-2">会员互转</span>
+                    </h3>
+                    <button onclick="exportTransfer()" class="btn btn-success text-sm">
+                        <i class="fas fa-file-excel mr-1"></i>导出Excel
+                    </button>
+                </div>
+                <div class="flex flex-wrap items-center gap-3">
+                    <div class="flex items-center space-x-2">
+                        <label class="text-sm text-gray-600">日期范围:</label>
+                        <input type="date" id="TransferStartDate" class="form-input text-sm py-1" value="${getDefaultDateRange().startDate}">
+                        <span class="text-gray-400">至</span>
+                        <input type="date" id="TransferEndDate" class="form-input text-sm py-1" value="${getDefaultDateRange().endDate}">
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <label class="text-sm text-gray-600">转出方:</label>
+                        <input type="text" id="TransferFromUser" class="form-input text-sm py-1 w-28" placeholder="账号">
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <label class="text-sm text-gray-600">转入方:</label>
+                        <input type="text" id="TransferToUser" class="form-input text-sm py-1 w-28" placeholder="账号">
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <label class="text-sm text-gray-600">类型:</label>
+                        <select id="TransferType" class="form-input text-sm py-1 w-28">
+                            <option value="">全部</option>
+                            <option value="member">会员互转</option>
+                            <option value="agent">代理下发</option>
+                        </select>
+                    </div>
+                    <button onclick="queryTransfer()" class="btn btn-primary text-sm">
+                        <i class="fas fa-search mr-1"></i>查询
+                    </button>
+                </div>
+            </div>
+            <div class="p-4" id="transferContent">
+                <div class="text-center text-gray-500 py-10"><i class="fas fa-spinner fa-spin mr-2"></i>加载中...</div>
+            </div>
+        </div>
+    `;
+    
+    await queryTransfer();
+}
+
+async function queryTransfer() {
+    const startDate = document.getElementById('TransferStartDate')?.value || getDefaultDateRange().startDate;
+    const endDate = document.getElementById('TransferEndDate')?.value || getDefaultDateRange().endDate;
+    const fromUser = document.getElementById('TransferFromUser')?.value || '';
+    const toUser = document.getElementById('TransferToUser')?.value || '';
+    const transferType = document.getElementById('TransferType')?.value || '';
+    const container = document.getElementById('transferContent');
+    
+    try {
+        let url = `/reports/transfers?start_date=${startDate}&end_date=${endDate}`;
+        if (fromUser) url += `&from_username=${encodeURIComponent(fromUser)}`;
+        if (toUser) url += `&to_username=${encodeURIComponent(toUser)}`;
+        if (transferType) url += `&transfer_type=${transferType}`;
+        
+        const res = await apiRequest(url);
+        const { list, total, summary } = res.data || { list: [], total: 0, summary: {} };
+        currentReportData.transfer = list;
+        
+        const transferTypeMap = {
+            'member': { label: '会员互转', color: 'blue' },
+            'agent': { label: '代理下发', color: 'purple' }
+        };
+        
+        container.innerHTML = `
+            <!-- 汇总统计 -->
+            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-4">
+                <div class="bg-purple-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">转账笔数</div>
+                    <div class="text-xl font-bold text-purple-600">${formatNumber(summary.total_count || 0)}</div>
+                </div>
+                <div class="bg-blue-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">转账总额</div>
+                    <div class="text-xl font-bold text-blue-600">${formatMoney(summary.total_amount || 0)}</div>
+                </div>
+                <div class="bg-orange-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">手续费</div>
+                    <div class="text-xl font-bold text-orange-600">${formatMoney(summary.total_fee || 0)}</div>
+                </div>
+                <div class="bg-green-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">实际到账</div>
+                    <div class="text-xl font-bold text-green-600">${formatMoney(summary.total_actual || 0)}</div>
+                </div>
+                <div class="bg-indigo-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">转出人数</div>
+                    <div class="text-xl font-bold text-indigo-600">${formatNumber(summary.unique_senders || 0)}</div>
+                </div>
+                <div class="bg-pink-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">转入人数</div>
+                    <div class="text-xl font-bold text-pink-600">${formatNumber(summary.unique_receivers || 0)}</div>
+                </div>
+            </div>
+            
+            <!-- 类型统计 -->
+            <div class="flex space-x-4 mb-4">
+                <div class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm">
+                    <i class="fas fa-users mr-1"></i>会员互转: ${formatNumber(summary.member_count || 0)} 笔
+                </div>
+                <div class="bg-purple-100 text-purple-800 px-3 py-1 rounded-full text-sm">
+                    <i class="fas fa-user-tie mr-1"></i>代理下发: ${formatNumber(summary.agent_count || 0)} 笔
+                </div>
+            </div>
+            
+            <!-- 数据表格 -->
+            <div class="overflow-x-auto">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>订单号</th>
+                            <th>转出方</th>
+                            <th><i class="fas fa-arrow-right text-gray-400"></i></th>
+                            <th>转入方</th>
+                            <th>金额</th>
+                            <th>手续费</th>
+                            <th>实际到账</th>
+                            <th>类型</th>
+                            <th>状态</th>
+                            <th>时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${list.length === 0 ? 
+                            '<tr><td colspan="11" class="text-center text-gray-500 py-8"><i class="fas fa-inbox mr-2 text-2xl block mb-2"></i>暂无转账记录</td></tr>' : 
+                            list.map(t => {
+                                const typeInfo = transferTypeMap[t.transfer_type] || { label: t.transfer_type, color: 'gray' };
+                                const statusMap = { 0: { label: '失败', color: 'red' }, 1: { label: '成功', color: 'green' }, 2: { label: '处理中', color: 'yellow' } };
+                                const statusInfo = statusMap[t.status] || { label: '未知', color: 'gray' };
+                                
+                                return `
+                                    <tr class="hover:bg-gray-50">
+                                        <td class="font-mono text-sm text-gray-600">${escapeHtml(t.order_no || '')}</td>
+                                        <td>
+                                            <div class="font-medium text-blue-600">${escapeHtml(t.from_username || '')}</div>
+                                            <div class="text-xs text-gray-400">ID: ${t.from_user_id}</div>
+                                        </td>
+                                        <td class="text-center">
+                                            <i class="fas fa-long-arrow-alt-right text-purple-400 text-xl"></i>
+                                        </td>
+                                        <td>
+                                            <div class="font-medium text-green-600">${escapeHtml(t.to_username || '')}</div>
+                                            <div class="text-xs text-gray-400">ID: ${t.to_user_id}</div>
+                                        </td>
+                                        <td class="font-bold text-purple-600">${formatMoney(t.amount)}</td>
+                                        <td class="${parseFloat(t.fee) > 0 ? 'text-orange-600' : 'text-gray-400'}">${formatMoney(t.fee)}</td>
+                                        <td class="font-medium text-green-600">${formatMoney(t.actual_amount)}</td>
+                                        <td><span class="badge badge-${typeInfo.color}">${typeInfo.label}</span></td>
+                                        <td><span class="badge badge-${statusInfo.color}">${statusInfo.label}</span></td>
+                                        <td class="text-sm text-gray-500">${formatDate(t.created_at)}</td>
+                                        <td>
+                                            <button onclick="viewTransferDetail(${t.transfer_id})" class="text-blue-500 hover:text-blue-700" title="查看详情">
+                                                <i class="fas fa-eye"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')
+                        }
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- 分页信息 -->
+            <div class="mt-4 text-sm text-gray-500 text-center">
+                共 ${formatNumber(total)} 条记录
+            </div>
+        `;
+    } catch (error) {
+        container.innerHTML = '<div class="text-center text-red-500 py-10">加载失败: ' + escapeHtml(error.message) + '</div>';
+    }
+}
+
+// 查看转账详情
+async function viewTransferDetail(transferId) {
+    try {
+        const res = await apiRequest(`/reports/transfers/${transferId}`);
+        const t = res.data;
+        
+        const transferTypeMap = { 'member': '会员互转', 'agent': '代理下发' };
+        const statusMap = { 0: '失败', 1: '成功', 2: '处理中' };
+        
+        openModal(`
+            <div class="card-header">
+                <i class="fas fa-exchange-alt mr-2 text-purple-500"></i>转账详情
+            </div>
+            <div class="p-6">
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <div class="text-sm text-gray-500 mb-1">订单号</div>
+                        <div class="font-mono font-medium">${escapeHtml(t.order_no || '')}</div>
+                    </div>
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <div class="text-sm text-gray-500 mb-1">转账时间</div>
+                        <div class="font-medium">${formatDate(t.created_at)}</div>
+                    </div>
+                </div>
+                
+                <!-- 转账流程 -->
+                <div class="flex items-center justify-center my-6 space-x-4">
+                    <div class="text-center bg-blue-50 p-4 rounded-lg min-w-[150px]">
+                        <div class="text-sm text-gray-500 mb-1">转出方</div>
+                        <div class="font-bold text-blue-600 text-lg">${escapeHtml(t.from_username || '')}</div>
+                        <div class="text-xs text-gray-400">ID: ${t.from_user_id}</div>
+                        <div class="mt-2 text-sm">
+                            <span class="text-gray-500">转前:</span> ${formatMoney(t.from_balance_before)}<br>
+                            <span class="text-gray-500">转后:</span> ${formatMoney(t.from_balance_after)}
+                        </div>
+                    </div>
+                    <div class="flex flex-col items-center">
+                        <div class="text-2xl font-bold text-purple-600">${formatMoney(t.amount)}</div>
+                        <i class="fas fa-arrow-right text-purple-400 text-3xl my-2"></i>
+                        ${parseFloat(t.fee) > 0 ? `<div class="text-sm text-orange-600">手续费: ${formatMoney(t.fee)}</div>` : ''}
+                    </div>
+                    <div class="text-center bg-green-50 p-4 rounded-lg min-w-[150px]">
+                        <div class="text-sm text-gray-500 mb-1">转入方</div>
+                        <div class="font-bold text-green-600 text-lg">${escapeHtml(t.to_username || '')}</div>
+                        <div class="text-xs text-gray-400">ID: ${t.to_user_id}</div>
+                        <div class="mt-2 text-sm">
+                            <span class="text-gray-500">转前:</span> ${formatMoney(t.to_balance_before)}<br>
+                            <span class="text-gray-500">转后:</span> ${formatMoney(t.to_balance_after)}
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 其他信息 -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+                    <div class="bg-gray-50 p-3 rounded text-center">
+                        <div class="text-xs text-gray-500">转账类型</div>
+                        <div class="font-medium">${transferTypeMap[t.transfer_type] || t.transfer_type}</div>
+                    </div>
+                    <div class="bg-gray-50 p-3 rounded text-center">
+                        <div class="text-xs text-gray-500">状态</div>
+                        <div class="font-medium text-${t.status === 1 ? 'green' : 'red'}-600">${statusMap[t.status] || '未知'}</div>
+                    </div>
+                    <div class="bg-gray-50 p-3 rounded text-center">
+                        <div class="text-xs text-gray-500">实际到账</div>
+                        <div class="font-medium text-green-600">${formatMoney(t.actual_amount)}</div>
+                    </div>
+                    <div class="bg-gray-50 p-3 rounded text-center">
+                        <div class="text-xs text-gray-500">操作IP</div>
+                        <div class="font-mono text-sm">${escapeHtml(t.ip_address || '-')}</div>
+                    </div>
+                </div>
+                
+                ${t.remark ? `
+                    <div class="mt-4 bg-yellow-50 p-3 rounded">
+                        <div class="text-xs text-gray-500 mb-1">备注</div>
+                        <div class="text-sm">${escapeHtml(t.remark)}</div>
+                    </div>
+                ` : ''}
+                
+                <div class="flex justify-end mt-6">
+                    <button onclick="closeModal()" class="btn btn-outline">关闭</button>
+                </div>
+            </div>
+        `);
+    } catch (error) {
+        alert('获取详情失败: ' + error.message);
+    }
+}
+
+// 导出转账记录
+function exportTransfer() {
+    if (!currentReportData.transfer || currentReportData.transfer.length === 0) {
+        alert('没有可导出的数据');
+        return;
+    }
+    
+    const transferTypeMap = { 'member': '会员互转', 'agent': '代理下发' };
+    const statusMap = { 0: '失败', 1: '成功', 2: '处理中' };
+    
+    const exportData = currentReportData.transfer.map(t => ({
+        ...t,
+        transfer_type_text: transferTypeMap[t.transfer_type] || t.transfer_type,
+        status_text: statusMap[t.status] || '未知'
+    }));
+    
+    exportToExcel(exportData, [
+        { key: 'order_no', label: '订单号' },
+        { key: 'from_username', label: '转出会员' },
+        { key: 'to_username', label: '转入会员' },
+        { key: 'amount', label: '转账金额' },
+        { key: 'fee', label: '手续费' },
+        { key: 'actual_amount', label: '实际到账' },
+        { key: 'transfer_type_text', label: '类型' },
+        { key: 'status_text', label: '状态' },
+        { key: 'created_at', label: '时间' },
+        { key: 'ip_address', label: '操作IP' },
+        { key: 'remark', label: '备注' }
+    ], '转账记录');
+}
+
 // 角色权限管理 - 增强版
 async function renderRoles() {
     const content = document.getElementById('pageContent');
@@ -5316,6 +5622,7 @@ const permissionStructure = {
     'report_game': { name: '游戏报表', icon: 'fa-gamepad', color: 'teal', parent: 'menu:report' },
     'report_daily': { name: '盈亏日报', icon: 'fa-calendar-day', color: 'teal', parent: 'menu:report' },
     'report_agent': { name: '代理业绩', icon: 'fa-user-tie', color: 'teal', parent: 'menu:report' },
+    'report_transfer': { name: '转账记录', icon: 'fa-exchange-alt', color: 'purple', parent: 'menu:report' },
     'content_announcement': { name: '公告管理', icon: 'fa-bullhorn', color: 'orange', parent: 'menu:content' },
     'system_admin': { name: '账号管理', icon: 'fa-user-cog', color: 'gray', parent: 'menu:system' },
     'system_role': { name: '角色权限', icon: 'fa-user-shield', color: 'gray', parent: 'menu:system' },
@@ -5335,7 +5642,7 @@ const menuMapping = {
     'menu:bet': { name: '注单管理', icon: 'fa-dice', modules: ['bet'] },
     'menu:commission': { name: '洗码管理', icon: 'fa-percentage', modules: ['commission_scheme', 'commission_record'] },
     'menu:risk': { name: '风控管理', icon: 'fa-shield-alt', modules: ['risk_rule', 'risk_alert', 'risk_limit'] },
-    'menu:report': { name: '报表中心', icon: 'fa-chart-bar', modules: ['report_settlement', 'report_ranking', 'report_game', 'report_daily', 'report_agent'] },
+    'menu:report': { name: '报表中心', icon: 'fa-chart-bar', modules: ['report_settlement', 'report_ranking', 'report_game', 'report_daily', 'report_agent', 'report_transfer'] },
     'menu:content': { name: '内容管理', icon: 'fa-newspaper', modules: ['content_announcement'] },
     'menu:system': { name: '系统控制', icon: 'fa-cogs', modules: ['system_admin', 'system_role', 'system_2fa', 'system_whitelist', 'system_log'] },
     'menu:studio': { name: '现场运营', icon: 'fa-video', modules: ['studio_dealer', 'studio_table', 'studio_shift'] }
