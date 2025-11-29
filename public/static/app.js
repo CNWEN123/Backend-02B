@@ -130,7 +130,8 @@ const menuConfig = [
         children: [
             { id: 'system-admins', title: '账号管理', page: 'system-admins' },
             { id: 'system-roles', title: '角色权限', page: 'system-roles' },
-            { id: 'system-2fa', title: '2FA设置', page: 'system-2fa', badge: 'NEW' },
+            { id: 'system-2fa', title: '2FA设置', page: 'system-2fa' },
+            { id: 'system-ip-whitelist', title: 'IP白名单', page: 'system-ip-whitelist', badge: 'NEW' },
             { id: 'system-logs', title: '操作日志', page: 'system-logs' },
             { id: 'system-login-logs', title: '登录日志', page: 'system-login-logs' }
         ]
@@ -316,6 +317,7 @@ function loadPage(page) {
         'system-admins': { title: '账号管理', handler: renderAdmins },
         'system-roles': { title: '角色权限', handler: renderRolesEnhanced },
         'system-2fa': { title: '2FA设置', handler: render2FASettings },
+        'system-ip-whitelist': { title: 'IP白名单', handler: renderIPWhitelist },
         'system-logs': { title: '操作日志', handler: renderAuditLogs },
         'system-login-logs': { title: '登录日志', handler: renderLoginLogs },
         'studio-dealers': { title: '荷官档案', handler: renderDealers },
@@ -3324,6 +3326,201 @@ async function renderRolesEnhanced() {
     } catch (error) {
         content.innerHTML = '<div class="text-center text-red-500 py-10">加载失败: ' + escapeHtml(error.message) + '</div>';
     }
+}
+
+// ==================== IP白名单管理 ====================
+
+async function renderIPWhitelist() {
+    const content = document.getElementById('pageContent');
+    try {
+        const res = await apiRequest('/admin/ip-whitelist');
+        const list = res.data || [];
+        
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header flex items-center justify-between">
+                    <h3 class="text-lg font-semibold"><i class="fas fa-shield-alt mr-2 text-blue-500"></i>IP白名单管理 <span class="badge badge-primary">${list.length}</span></h3>
+                    <div class="flex gap-2">
+                        <button onclick="showAddIPWhitelist()" class="btn btn-primary text-sm"><i class="fas fa-plus mr-1"></i>添加IP</button>
+                        <button onclick="renderIPWhitelist()" class="btn btn-secondary text-sm"><i class="fas fa-sync-alt mr-1"></i>刷新</button>
+                    </div>
+                </div>
+                <div class="p-4">
+                    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
+                        <div class="flex items-center">
+                            <i class="fas fa-info-circle text-yellow-500 mr-2"></i>
+                            <span class="text-yellow-700 text-sm">提示: IP白名单用于限制系统访问来源，只有在白名单中的IP才能访问后台。<code class="bg-yellow-100 px-1 rounded">0.0.0.0</code> 表示允许所有IP。</span>
+                        </div>
+                    </div>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th><input type="checkbox" id="selectAllIP" onchange="toggleSelectAllIP()"></th>
+                                <th>IP地址</th>
+                                <th>类型</th>
+                                <th>描述</th>
+                                <th>添加人</th>
+                                <th>添加时间</th>
+                                <th>过期时间</th>
+                                <th>状态</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${list.length === 0 ? '<tr><td colspan="9" class="text-center text-gray-500 py-4">暂无IP白名单记录</td></tr>' : 
+                            list.map(ip => `
+                                <tr>
+                                    <td><input type="checkbox" class="ip-checkbox" value="${ip.id}"></td>
+                                    <td class="font-mono font-medium">${escapeHtml(ip.ip_address)}</td>
+                                    <td><span class="badge ${ip.ip_type === 'single' ? 'badge-info' : ip.ip_type === 'range' ? 'badge-warning' : 'badge-success'}">${ip.ip_type === 'single' ? '单个IP' : ip.ip_type === 'range' ? 'IP范围' : 'CIDR'}</span></td>
+                                    <td class="text-sm text-gray-600">${escapeHtml(ip.description || '-')}</td>
+                                    <td class="text-sm">${escapeHtml(ip.admin_username || 'system')}</td>
+                                    <td class="text-sm text-gray-500">${formatDate(ip.created_at)}</td>
+                                    <td class="text-sm ${ip.expires_at && new Date(ip.expires_at) < new Date() ? 'text-red-500' : 'text-gray-500'}">${ip.expires_at ? formatDate(ip.expires_at) : '永久'}</td>
+                                    <td>
+                                        <button onclick="toggleIPStatus(${ip.id}, ${ip.status === 1 ? 0 : 1})" class="cursor-pointer">
+                                            ${ip.status === 1 ? '<span class="badge badge-success">启用</span>' : '<span class="badge badge-danger">禁用</span>'}
+                                        </button>
+                                    </td>
+                                    <td>
+                                        <button onclick="editIPWhitelist(${ip.id})" class="text-blue-500 hover:text-blue-700 mr-2" title="编辑"><i class="fas fa-edit"></i></button>
+                                        <button onclick="deleteIPWhitelist(${ip.id}, '${escapeAttr(ip.ip_address)}')" class="text-red-500 hover:text-red-700" title="删除"><i class="fas fa-trash"></i></button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    ${list.length > 0 ? `
+                        <div class="mt-4 flex gap-2">
+                            <button onclick="batchIPStatus(1)" class="btn btn-success text-sm"><i class="fas fa-check mr-1"></i>批量启用</button>
+                            <button onclick="batchIPStatus(0)" class="btn btn-warning text-sm"><i class="fas fa-ban mr-1"></i>批量禁用</button>
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        content.innerHTML = '<div class="text-center text-red-500 py-10">加载失败: ' + escapeHtml(error.message) + '</div>';
+    }
+}
+
+function showAddIPWhitelist() {
+    openModal(`
+        <div class="p-6" style="min-width: 450px;">
+            <h3 class="text-lg font-bold mb-4"><i class="fas fa-plus-circle text-blue-500 mr-2"></i>添加IP白名单</h3>
+            <form id="ipWhitelistForm" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">IP地址 <span class="text-red-500">*</span></label>
+                    <input type="text" id="ipAddress" class="form-input w-full" placeholder="如: 192.168.1.100 或 192.168.1.0/24" required>
+                    <p class="text-xs text-gray-500 mt-1">支持单个IP、CIDR格式(如192.168.1.0/24)或IP范围(如192.168.1.1-192.168.1.255)</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">IP类型</label>
+                    <select id="ipType" class="form-input w-full">
+                        <option value="single">单个IP</option>
+                        <option value="cidr">CIDR网段</option>
+                        <option value="range">IP范围</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">描述</label>
+                    <input type="text" id="ipDescription" class="form-input w-full" placeholder="如: 办公室网络、VPN出口等">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">过期时间 <span class="text-gray-400">(可选)</span></label>
+                    <input type="datetime-local" id="ipExpires" class="form-input w-full">
+                    <p class="text-xs text-gray-500 mt-1">留空表示永久有效</p>
+                </div>
+                <div class="flex justify-end gap-3 pt-4 border-t">
+                    <button type="button" onclick="closeModal()" class="btn btn-secondary">取消</button>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save mr-1"></i>保存</button>
+                </div>
+            </form>
+        </div>
+    `);
+    document.getElementById('ipWhitelistForm').onsubmit = async (e) => { e.preventDefault(); await submitIPWhitelist(); };
+}
+
+async function submitIPWhitelist(id = null) {
+    const data = {
+        ip_address: document.getElementById('ipAddress').value.trim(),
+        ip_type: document.getElementById('ipType').value,
+        description: document.getElementById('ipDescription').value.trim() || null,
+        expires_at: document.getElementById('ipExpires').value || null
+    };
+    if (!data.ip_address) { alert('请输入IP地址'); return; }
+    
+    try {
+        const url = id ? `/admin/ip-whitelist/${id}` : '/admin/ip-whitelist';
+        const method = id ? 'PUT' : 'POST';
+        const res = await apiRequest(url, { method, body: JSON.stringify(data) });
+        if (res.success) { 
+            closeModal(); 
+            alert(id ? 'IP白名单更新成功' : 'IP已添加到白名单'); 
+            loadPage('system-ip-whitelist'); 
+        } else { 
+            alert(res.message || '操作失败'); 
+        }
+    } catch (error) { 
+        alert('操作失败: ' + error.message); 
+    }
+}
+
+async function editIPWhitelist(id) {
+    try {
+        const res = await apiRequest(`/admin/ip-whitelist/${id}`);
+        if (!res.success) { alert('获取详情失败'); return; }
+        const ip = res.data;
+        showAddIPWhitelist();
+        setTimeout(() => {
+            document.getElementById('ipAddress').value = ip.ip_address || '';
+            document.getElementById('ipType').value = ip.ip_type || 'single';
+            document.getElementById('ipDescription').value = ip.description || '';
+            document.getElementById('ipExpires').value = ip.expires_at ? ip.expires_at.slice(0, 16) : '';
+            document.querySelector('#ipWhitelistForm').previousElementSibling.innerHTML = '<i class="fas fa-edit text-blue-500 mr-2"></i>编辑IP白名单';
+            document.getElementById('ipWhitelistForm').onsubmit = async (e) => { e.preventDefault(); await submitIPWhitelist(id); };
+        }, 100);
+    } catch (error) { alert('获取详情失败: ' + error.message); }
+}
+
+async function deleteIPWhitelist(id, ipAddress) {
+    if (!confirm(`确定要从白名单中移除IP "${ipAddress}" 吗？`)) return;
+    try {
+        const res = await apiRequest(`/admin/ip-whitelist/${id}`, { method: 'DELETE' });
+        if (res.success) { alert('IP已从白名单移除'); loadPage('system-ip-whitelist'); }
+        else { alert(res.message || '删除失败'); }
+    } catch (error) { alert('删除失败: ' + error.message); }
+}
+
+async function toggleIPStatus(id, status) {
+    try {
+        const res = await apiRequest(`/admin/ip-whitelist/${id}`, { 
+            method: 'PUT', 
+            body: JSON.stringify({ status }) 
+        });
+        if (res.success) { loadPage('system-ip-whitelist'); }
+        else { alert(res.message || '操作失败'); }
+    } catch (error) { alert('操作失败: ' + error.message); }
+}
+
+function toggleSelectAllIP() {
+    const checked = document.getElementById('selectAllIP').checked;
+    document.querySelectorAll('.ip-checkbox').forEach(cb => cb.checked = checked);
+}
+
+async function batchIPStatus(status) {
+    const ids = Array.from(document.querySelectorAll('.ip-checkbox:checked')).map(cb => parseInt(cb.value));
+    if (ids.length === 0) { alert('请选择要操作的IP'); return; }
+    if (!confirm(`确定要${status === 1 ? '启用' : '禁用'}选中的 ${ids.length} 条IP吗？`)) return;
+    
+    try {
+        const res = await apiRequest('/admin/ip-whitelist/batch-status', { 
+            method: 'POST', 
+            body: JSON.stringify({ ids, status }) 
+        });
+        if (res.success) { alert(res.message); loadPage('system-ip-whitelist'); }
+        else { alert(res.message || '操作失败'); }
+    } catch (error) { alert('操作失败: ' + error.message); }
 }
 
 // 2FA设置页面

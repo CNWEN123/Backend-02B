@@ -3767,6 +3767,165 @@ app.get('/api/v1/admin/2fa/status', async (c) => {
   }
 })
 
+// ==================== IP白名单管理 ====================
+
+// IP白名单列表
+app.get('/api/v1/admin/ip-whitelist', async (c) => {
+  try {
+    const result = await c.env.DB.prepare(`
+      SELECT * FROM ip_whitelist ORDER BY created_at DESC
+    `).all()
+
+    return c.json({ success: true, data: result.results || [] })
+  } catch (error) {
+    return c.json({ success: false, message: '获取IP白名单失败' }, 500)
+  }
+})
+
+// IP白名单详情
+app.get('/api/v1/admin/ip-whitelist/:id', async (c) => {
+  const id = c.req.param('id')
+
+  try {
+    const item = await c.env.DB.prepare('SELECT * FROM ip_whitelist WHERE id = ?').bind(id).first()
+    if (!item) {
+      return c.json({ success: false, message: 'IP记录不存在' }, 404)
+    }
+    return c.json({ success: true, data: item })
+  } catch (error) {
+    return c.json({ success: false, message: '获取详情失败' }, 500)
+  }
+})
+
+// 添加IP白名单
+app.post('/api/v1/admin/ip-whitelist', async (c) => {
+  const admin = c.get('admin')
+  const { ip_address, ip_type, description, expires_at } = await c.req.json()
+
+  if (!ip_address) {
+    return c.json({ success: false, message: '请输入IP地址' }, 400)
+  }
+
+  // 验证IP格式
+  const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/
+  const ipv4CidrRegex = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/
+  const ipv4RangeRegex = /^(\d{1,3}\.){3}\d{1,3}-(\d{1,3}\.){3}\d{1,3}$/
+  
+  if (!ipv4Regex.test(ip_address) && !ipv4CidrRegex.test(ip_address) && !ipv4RangeRegex.test(ip_address) && ip_address !== '*') {
+    return c.json({ success: false, message: 'IP地址格式无效' }, 400)
+  }
+
+  try {
+    const result = await c.env.DB.prepare(`
+      INSERT INTO ip_whitelist (ip_address, ip_type, description, admin_id, admin_username, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).bind(
+      ip_address,
+      ip_type || 'single',
+      description || '',
+      admin.admin_id,
+      admin.username,
+      expires_at || null
+    ).run()
+
+    // 记录审计日志
+    await c.env.DB.prepare(`
+      INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, target_id, new_value, ip_address)
+      VALUES (?, ?, 'CREATE', 'ip_whitelist', ?, ?, ?)
+    `).bind(admin.admin_id, admin.username, result.meta.last_row_id, JSON.stringify({ ip_address, description }), c.req.header('CF-Connecting-IP') || 'unknown').run()
+
+    return c.json({ success: true, data: { id: result.meta.last_row_id }, message: 'IP已添加到白名单' })
+  } catch (error: any) {
+    if (error.message?.includes('UNIQUE')) {
+      return c.json({ success: false, message: '该IP地址已存在' }, 400)
+    }
+    return c.json({ success: false, message: '添加失败' }, 500)
+  }
+})
+
+// 更新IP白名单
+app.put('/api/v1/admin/ip-whitelist/:id', async (c) => {
+  const id = c.req.param('id')
+  const admin = c.get('admin')
+  const body = await c.req.json()
+  const { ip_address, ip_type, description, expires_at } = body
+  // status特殊处理：0是有效值，只在undefined时保留原值
+  const status = body.status !== undefined ? body.status : null
+
+  try {
+    // 分别处理有status和无status的情况
+    if (status !== null) {
+      await c.env.DB.prepare(`
+        UPDATE ip_whitelist SET
+          ip_address = COALESCE(?, ip_address),
+          ip_type = COALESCE(?, ip_type),
+          description = COALESCE(?, description),
+          status = ?,
+          expires_at = ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(ip_address || null, ip_type || null, description || null, status, expires_at || null, id).run()
+    } else {
+      await c.env.DB.prepare(`
+        UPDATE ip_whitelist SET
+          ip_address = COALESCE(?, ip_address),
+          ip_type = COALESCE(?, ip_type),
+          description = COALESCE(?, description),
+          expires_at = ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(ip_address || null, ip_type || null, description || null, expires_at || null, id).run()
+    }
+
+    return c.json({ success: true, message: '更新成功' })
+  } catch (error) {
+    return c.json({ success: false, message: '更新失败' }, 500)
+  }
+})
+
+// 删除IP白名单
+app.delete('/api/v1/admin/ip-whitelist/:id', async (c) => {
+  const id = parseInt(c.req.param('id'))
+  const admin = c.get('admin')
+
+  try {
+    // 获取要删除的记录信息
+    const item = await c.env.DB.prepare('SELECT ip_address FROM ip_whitelist WHERE id = ?').bind(id).first()
+    
+    await c.env.DB.prepare('DELETE FROM ip_whitelist WHERE id = ?').bind(id).run()
+
+    // 记录审计日志
+    await c.env.DB.prepare(`
+      INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, target_id, old_value, ip_address)
+      VALUES (?, ?, 'DELETE', 'ip_whitelist', ?, ?, ?)
+    `).bind(admin.admin_id, admin.username, id, JSON.stringify(item || {}), c.req.header('CF-Connecting-IP') || 'unknown').run()
+
+    return c.json({ success: true, message: 'IP已从白名单移除' })
+  } catch (error) {
+    return c.json({ success: false, message: '删除失败' }, 500)
+  }
+})
+
+// 批量切换IP白名单状态
+app.post('/api/v1/admin/ip-whitelist/batch-status', async (c) => {
+  const { ids, status } = await c.req.json()
+
+  if (!ids || !Array.isArray(ids) || ids.length === 0) {
+    return c.json({ success: false, message: '请选择要操作的IP' }, 400)
+  }
+
+  try {
+    const placeholders = ids.map(() => '?').join(',')
+    await c.env.DB.prepare(`
+      UPDATE ip_whitelist SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})
+    `).bind(status, ...ids).run()
+
+    return c.json({ success: true, message: `已${status === 1 ? '启用' : '禁用'} ${ids.length} 条IP` })
+  } catch (error) {
+    return c.json({ success: false, message: '批量操作失败' }, 500)
+  }
+})
+
 // 审计日志
 app.get('/api/v1/admin/audit-logs', async (c) => {
   const { page, size } = validatePagination(c.req.query('page'), c.req.query('size'))
