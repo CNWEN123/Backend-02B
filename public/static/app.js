@@ -4967,11 +4967,12 @@ function exportAgent() {
 // ==================== 转账记录报表 ====================
 async function renderTransferRecords() {
     const content = document.getElementById('pageContent');
+    const defaultRange = getDefaultDateRange();
     
     content.innerHTML = `
         <div class="card">
-            <div class="card-header flex flex-col gap-3">
-                <div class="flex items-center justify-between">
+            <div class="card-header">
+                <div class="flex items-center justify-between mb-3">
                     <h3 class="text-lg font-semibold">
                         <i class="fas fa-exchange-alt mr-2 text-purple-500"></i>转账记录报表
                         <span class="badge badge-purple ml-2">会员互转</span>
@@ -4980,32 +4981,36 @@ async function renderTransferRecords() {
                         <i class="fas fa-file-excel mr-1"></i>导出Excel
                     </button>
                 </div>
-                <div class="flex flex-wrap items-center gap-3">
-                    <div class="flex items-center space-x-2">
-                        <label class="text-sm text-gray-600">日期范围:</label>
-                        <input type="date" id="TransferStartDate" class="form-input text-sm py-1" value="${getDefaultDateRange().startDate}">
-                        <span class="text-gray-400">至</span>
-                        <input type="date" id="TransferEndDate" class="form-input text-sm py-1" value="${getDefaultDateRange().endDate}">
+                <div class="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">开始日期</label>
+                        <input type="date" id="TransferStartDate" class="form-input text-sm w-full" value="${defaultRange.startDate}">
                     </div>
-                    <div class="flex items-center space-x-2">
-                        <label class="text-sm text-gray-600">转出方:</label>
-                        <input type="text" id="TransferFromUser" class="form-input text-sm py-1 w-28" placeholder="账号">
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">结束日期</label>
+                        <input type="date" id="TransferEndDate" class="form-input text-sm w-full" value="${defaultRange.endDate}">
                     </div>
-                    <div class="flex items-center space-x-2">
-                        <label class="text-sm text-gray-600">转入方:</label>
-                        <input type="text" id="TransferToUser" class="form-input text-sm py-1 w-28" placeholder="账号">
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">转出方</label>
+                        <input type="text" id="TransferFromUser" class="form-input text-sm w-full" placeholder="账号">
                     </div>
-                    <div class="flex items-center space-x-2">
-                        <label class="text-sm text-gray-600">类型:</label>
-                        <select id="TransferType" class="form-input text-sm py-1 w-28">
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">转入方</label>
+                        <input type="text" id="TransferToUser" class="form-input text-sm w-full" placeholder="账号">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">类型</label>
+                        <select id="TransferType" class="form-input text-sm w-full">
                             <option value="">全部</option>
                             <option value="member">会员互转</option>
                             <option value="agent">代理下发</option>
                         </select>
                     </div>
-                    <button onclick="queryTransfer()" class="btn btn-primary text-sm">
-                        <i class="fas fa-search mr-1"></i>查询
-                    </button>
+                    <div>
+                        <button onclick="queryTransfer()" class="btn btn-primary text-sm w-full">
+                            <i class="fas fa-search mr-1"></i>查询
+                        </button>
+                    </div>
                 </div>
             </div>
             <div class="p-4" id="transferContent">
@@ -5086,11 +5091,9 @@ async function queryTransfer() {
                         <tr>
                             <th>订单号</th>
                             <th>转出方</th>
-                            <th><i class="fas fa-arrow-right text-gray-400"></i></th>
+                            <th></th>
                             <th>转入方</th>
                             <th>金额</th>
-                            <th>手续费</th>
-                            <th>实际到账</th>
                             <th>类型</th>
                             <th>状态</th>
                             <th>时间</th>
@@ -5099,7 +5102,7 @@ async function queryTransfer() {
                     </thead>
                     <tbody>
                         ${list.length === 0 ? 
-                            '<tr><td colspan="11" class="text-center text-gray-500 py-8"><i class="fas fa-inbox mr-2 text-2xl block mb-2"></i>暂无转账记录</td></tr>' : 
+                            '<tr><td colspan="9" class="text-center text-gray-500 py-8"><i class="fas fa-inbox text-3xl mb-2"></i><br>暂无转账记录</td></tr>' : 
                             list.map(t => {
                                 const typeInfo = transferTypeMap[t.transfer_type] || { label: t.transfer_type, color: 'gray' };
                                 const statusMap = { 0: { label: '失败', color: 'red' }, 1: { label: '成功', color: 'green' }, 2: { label: '处理中', color: 'yellow' } };
@@ -5107,27 +5110,37 @@ async function queryTransfer() {
                                 
                                 return `
                                     <tr class="hover:bg-gray-50">
-                                        <td class="font-mono text-sm text-gray-600">${escapeHtml(t.order_no || '')}</td>
+                                        <td>
+                                            <div class="font-mono text-xs text-gray-600">${escapeHtml(t.order_no || '')}</div>
+                                        </td>
                                         <td>
                                             <div class="font-medium text-blue-600">${escapeHtml(t.from_username || '')}</div>
-                                            <div class="text-xs text-gray-400">ID: ${t.from_user_id}</div>
+                                            <div class="text-xs text-gray-400">
+                                                <i class="fas fa-map-marker-alt mr-1"></i>${escapeHtml(t.ip_address || '-')}
+                                            </div>
                                         </td>
-                                        <td class="text-center">
-                                            <i class="fas fa-long-arrow-alt-right text-purple-400 text-xl"></i>
+                                        <td class="text-center px-1">
+                                            <div class="flex flex-col items-center">
+                                                <span class="text-purple-600 font-bold text-sm">${formatMoney(t.amount)}</span>
+                                                <i class="fas fa-arrow-right text-purple-400"></i>
+                                            </div>
                                         </td>
                                         <td>
                                             <div class="font-medium text-green-600">${escapeHtml(t.to_username || '')}</div>
-                                            <div class="text-xs text-gray-400">ID: ${t.to_user_id}</div>
+                                            <div class="text-xs text-gray-400">
+                                                <i class="fas fa-map-marker-alt mr-1"></i>${escapeHtml(t.to_ip_address || '-')}
+                                            </div>
                                         </td>
-                                        <td class="font-bold text-purple-600">${formatMoney(t.amount)}</td>
-                                        <td class="${parseFloat(t.fee) > 0 ? 'text-orange-600' : 'text-gray-400'}">${formatMoney(t.fee)}</td>
-                                        <td class="font-medium text-green-600">${formatMoney(t.actual_amount)}</td>
+                                        <td>
+                                            <div class="text-green-600 font-medium">${formatMoney(t.actual_amount)}</div>
+                                            ${parseFloat(t.fee) > 0 ? `<div class="text-xs text-orange-500">费:${formatMoney(t.fee)}</div>` : ''}
+                                        </td>
                                         <td><span class="badge badge-${typeInfo.color}">${typeInfo.label}</span></td>
                                         <td><span class="badge badge-${statusInfo.color}">${statusInfo.label}</span></td>
-                                        <td class="text-sm text-gray-500">${formatDate(t.created_at)}</td>
+                                        <td class="text-xs text-gray-500">${formatDate(t.created_at)}</td>
                                         <td>
-                                            <button onclick="viewTransferDetail(${t.transfer_id})" class="text-blue-500 hover:text-blue-700" title="查看详情">
-                                                <i class="fas fa-eye"></i>
+                                            <button onclick="viewTransferDetail(${t.transfer_id})" class="btn btn-outline text-xs py-1 px-2" title="查看详情">
+                                                <i class="fas fa-eye mr-1"></i>详情
                                             </button>
                                         </td>
                                     </tr>
@@ -5153,85 +5166,215 @@ async function viewTransferDetail(transferId) {
     try {
         const res = await apiRequest(`/reports/transfers/${transferId}`);
         const t = res.data;
+        const fromUser = t.from_user_info || {};
+        const toUser = t.to_user_info || {};
+        const fundSource = t.fund_source || [];
         
         const transferTypeMap = { 'member': '会员互转', 'agent': '代理下发' };
         const statusMap = { 0: '失败', 1: '成功', 2: '处理中' };
+        const txTypeMap = { 1: '存款', 2: '提款', 3: '投注', 4: '派彩', 5: '红利', 6: '洗码', 7: '调账', 8: '转入', 9: '转出' };
         
         openModal(`
-            <div class="card-header">
-                <i class="fas fa-exchange-alt mr-2 text-purple-500"></i>转账详情
+            <div class="card-header flex items-center justify-between">
+                <span><i class="fas fa-exchange-alt mr-2 text-purple-500"></i>转账详情</span>
+                <span class="badge badge-${t.status === 1 ? 'success' : 'danger'}">${statusMap[t.status] || '未知'}</span>
             </div>
-            <div class="p-6">
-                <div class="grid grid-cols-2 gap-4 mb-4">
-                    <div class="bg-gray-50 p-4 rounded-lg">
-                        <div class="text-sm text-gray-500 mb-1">订单号</div>
-                        <div class="font-mono font-medium">${escapeHtml(t.order_no || '')}</div>
+            <div class="p-6" style="max-height: 80vh; overflow-y: auto;">
+                <!-- 基本信息 -->
+                <div class="grid grid-cols-3 gap-3 mb-4">
+                    <div class="bg-gray-50 p-3 rounded-lg">
+                        <div class="text-xs text-gray-500 mb-1">订单号</div>
+                        <div class="font-mono text-sm font-medium">${escapeHtml(t.order_no || '')}</div>
                     </div>
-                    <div class="bg-gray-50 p-4 rounded-lg">
-                        <div class="text-sm text-gray-500 mb-1">转账时间</div>
-                        <div class="font-medium">${formatDate(t.created_at)}</div>
+                    <div class="bg-gray-50 p-3 rounded-lg">
+                        <div class="text-xs text-gray-500 mb-1">转账时间</div>
+                        <div class="text-sm font-medium">${formatDate(t.created_at)}</div>
                     </div>
-                </div>
-                
-                <!-- 转账流程 -->
-                <div class="flex items-center justify-center my-6 space-x-4">
-                    <div class="text-center bg-blue-50 p-4 rounded-lg min-w-[150px]">
-                        <div class="text-sm text-gray-500 mb-1">转出方</div>
-                        <div class="font-bold text-blue-600 text-lg">${escapeHtml(t.from_username || '')}</div>
-                        <div class="text-xs text-gray-400">ID: ${t.from_user_id}</div>
-                        <div class="mt-2 text-sm">
-                            <span class="text-gray-500">转前:</span> ${formatMoney(t.from_balance_before)}<br>
-                            <span class="text-gray-500">转后:</span> ${formatMoney(t.from_balance_after)}
-                        </div>
-                    </div>
-                    <div class="flex flex-col items-center">
-                        <div class="text-2xl font-bold text-purple-600">${formatMoney(t.amount)}</div>
-                        <i class="fas fa-arrow-right text-purple-400 text-3xl my-2"></i>
-                        ${parseFloat(t.fee) > 0 ? `<div class="text-sm text-orange-600">手续费: ${formatMoney(t.fee)}</div>` : ''}
-                    </div>
-                    <div class="text-center bg-green-50 p-4 rounded-lg min-w-[150px]">
-                        <div class="text-sm text-gray-500 mb-1">转入方</div>
-                        <div class="font-bold text-green-600 text-lg">${escapeHtml(t.to_username || '')}</div>
-                        <div class="text-xs text-gray-400">ID: ${t.to_user_id}</div>
-                        <div class="mt-2 text-sm">
-                            <span class="text-gray-500">转前:</span> ${formatMoney(t.to_balance_before)}<br>
-                            <span class="text-gray-500">转后:</span> ${formatMoney(t.to_balance_after)}
-                        </div>
+                    <div class="bg-gray-50 p-3 rounded-lg">
+                        <div class="text-xs text-gray-500 mb-1">类型</div>
+                        <div class="text-sm font-medium">${transferTypeMap[t.transfer_type] || t.transfer_type}</div>
                     </div>
                 </div>
                 
-                <!-- 其他信息 -->
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
-                    <div class="bg-gray-50 p-3 rounded text-center">
-                        <div class="text-xs text-gray-500">转账类型</div>
-                        <div class="font-medium">${transferTypeMap[t.transfer_type] || t.transfer_type}</div>
+                <!-- 转账流程图 -->
+                <div class="bg-gradient-to-r from-blue-50 via-purple-50 to-green-50 rounded-lg p-4 mb-4">
+                    <div class="flex items-stretch justify-between">
+                        <!-- 转出方 -->
+                        <div class="flex-1 bg-white rounded-lg p-4 shadow-sm border-l-4 border-blue-500">
+                            <div class="flex items-center mb-2">
+                                <i class="fas fa-user-minus text-blue-500 mr-2"></i>
+                                <span class="text-sm text-gray-500">转出方</span>
+                            </div>
+                            <div class="font-bold text-blue-600 text-lg">${escapeHtml(t.from_username || '')}</div>
+                            <div class="text-xs text-gray-400 mb-2">ID: ${t.from_user_id}</div>
+                            <div class="bg-blue-50 rounded p-2 text-sm space-y-1">
+                                <div class="flex justify-between">
+                                    <span class="text-gray-500">转前余额:</span>
+                                    <span class="font-medium">${formatMoney(t.from_balance_before)}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-500">转后余额:</span>
+                                    <span class="font-medium text-blue-600">${formatMoney(t.from_balance_after)}</span>
+                                </div>
+                            </div>
+                            <div class="mt-2 pt-2 border-t text-xs">
+                                <div class="flex items-center text-gray-500">
+                                    <i class="fas fa-map-marker-alt mr-1 text-red-400"></i>
+                                    <span>IP: </span>
+                                    <span class="font-mono ml-1 text-gray-700">${escapeHtml(t.from_ip || t.ip_address || '-')}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 中间箭头和金额 -->
+                        <div class="flex flex-col items-center justify-center px-4">
+                            <div class="text-2xl font-bold text-purple-600">${formatMoney(t.amount)}</div>
+                            <div class="flex items-center my-2">
+                                <div class="w-8 h-0.5 bg-purple-300"></div>
+                                <i class="fas fa-arrow-right text-purple-500 text-2xl mx-1"></i>
+                                <div class="w-8 h-0.5 bg-purple-300"></div>
+                            </div>
+                            ${parseFloat(t.fee) > 0 ? `
+                                <div class="text-xs text-orange-600 bg-orange-50 px-2 py-1 rounded">
+                                    手续费: ${formatMoney(t.fee)}
+                                </div>
+                            ` : ''}
+                            <div class="text-sm text-green-600 mt-1">
+                                实到: ${formatMoney(t.actual_amount)}
+                            </div>
+                        </div>
+                        
+                        <!-- 接收方 -->
+                        <div class="flex-1 bg-white rounded-lg p-4 shadow-sm border-l-4 border-green-500">
+                            <div class="flex items-center mb-2">
+                                <i class="fas fa-user-plus text-green-500 mr-2"></i>
+                                <span class="text-sm text-gray-500">接收方</span>
+                            </div>
+                            <div class="font-bold text-green-600 text-lg">${escapeHtml(t.to_username || '')}</div>
+                            <div class="text-xs text-gray-400 mb-2">ID: ${t.to_user_id}</div>
+                            <div class="bg-green-50 rounded p-2 text-sm space-y-1">
+                                <div class="flex justify-between">
+                                    <span class="text-gray-500">转前余额:</span>
+                                    <span class="font-medium">${formatMoney(t.to_balance_before)}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-500">转后余额:</span>
+                                    <span class="font-medium text-green-600">${formatMoney(t.to_balance_after)}</span>
+                                </div>
+                            </div>
+                            <div class="mt-2 pt-2 border-t text-xs">
+                                <div class="flex items-center text-gray-500">
+                                    <i class="fas fa-map-marker-alt mr-1 text-red-400"></i>
+                                    <span>IP: </span>
+                                    <span class="font-mono ml-1 text-gray-700">${escapeHtml(t.to_ip || t.to_ip_address || '-')}</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="bg-gray-50 p-3 rounded text-center">
-                        <div class="text-xs text-gray-500">状态</div>
-                        <div class="font-medium text-${t.status === 1 ? 'green' : 'red'}-600">${statusMap[t.status] || '未知'}</div>
+                </div>
+                
+                <!-- 转出人账户汇总 -->
+                <div class="border rounded-lg mb-4">
+                    <div class="bg-blue-50 px-4 py-2 rounded-t-lg border-b flex items-center">
+                        <i class="fas fa-wallet text-blue-500 mr-2"></i>
+                        <span class="font-medium">转出人账户概览</span>
+                        <span class="text-xs text-gray-500 ml-2">(${escapeHtml(t.from_username || '')})</span>
                     </div>
-                    <div class="bg-gray-50 p-3 rounded text-center">
-                        <div class="text-xs text-gray-500">实际到账</div>
-                        <div class="font-medium text-green-600">${formatMoney(t.actual_amount)}</div>
+                    <div class="p-4">
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                            <div class="text-center p-2 bg-gray-50 rounded">
+                                <div class="text-xs text-gray-500">当前余额</div>
+                                <div class="font-bold text-blue-600">${formatMoney(fromUser.balance || 0)}</div>
+                            </div>
+                            <div class="text-center p-2 bg-gray-50 rounded">
+                                <div class="text-xs text-gray-500">累计存款</div>
+                                <div class="font-medium text-green-600">${formatMoney(fromUser.total_deposit_amount || 0)}</div>
+                            </div>
+                            <div class="text-center p-2 bg-gray-50 rounded">
+                                <div class="text-xs text-gray-500">累计红利</div>
+                                <div class="font-medium text-pink-600">${formatMoney(fromUser.total_bonus || 0)}</div>
+                            </div>
+                            <div class="text-center p-2 bg-gray-50 rounded">
+                                <div class="text-xs text-gray-500">累计投注</div>
+                                <div class="font-medium text-purple-600">${formatMoney(fromUser.total_bet || 0)}</div>
+                            </div>
+                            <div class="text-center p-2 bg-gray-50 rounded">
+                                <div class="text-xs text-gray-500">累计提款</div>
+                                <div class="font-medium text-red-600">${formatMoney(fromUser.total_withdraw_amount || 0)}</div>
+                            </div>
+                            <div class="text-center p-2 bg-gray-50 rounded">
+                                <div class="text-xs text-gray-500">转出总额</div>
+                                <div class="font-medium text-orange-600">${formatMoney(fromUser.total_transfer_out || 0)}</div>
+                            </div>
+                            <div class="text-center p-2 bg-gray-50 rounded">
+                                <div class="text-xs text-gray-500">转入总额</div>
+                                <div class="font-medium text-teal-600">${formatMoney(fromUser.total_transfer_in || 0)}</div>
+                            </div>
+                            <div class="text-center p-2 bg-gray-50 rounded">
+                                <div class="text-xs text-gray-500">资金净值</div>
+                                <div class="font-medium">${formatMoney((fromUser.total_deposit_amount || 0) + (fromUser.total_bonus || 0) + (fromUser.total_transfer_in || 0) - (fromUser.total_withdraw_amount || 0) - (fromUser.total_transfer_out || 0))}</div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="bg-gray-50 p-3 rounded text-center">
-                        <div class="text-xs text-gray-500">操作IP</div>
-                        <div class="font-mono text-sm">${escapeHtml(t.ip_address || '-')}</div>
+                </div>
+                
+                <!-- 转出人资金来源账单 -->
+                <div class="border rounded-lg mb-4">
+                    <div class="bg-orange-50 px-4 py-2 rounded-t-lg border-b flex items-center justify-between">
+                        <div class="flex items-center">
+                            <i class="fas fa-history text-orange-500 mr-2"></i>
+                            <span class="font-medium">资金来源账单</span>
+                            <span class="text-xs text-gray-500 ml-2">(转账前近期交易)</span>
+                        </div>
+                        <span class="badge badge-orange">${fundSource.length} 条</span>
+                    </div>
+                    <div class="max-h-60 overflow-y-auto">
+                        ${fundSource.length > 0 ? `
+                            <table class="data-table mb-0 text-sm">
+                                <thead class="sticky top-0 bg-white">
+                                    <tr>
+                                        <th>时间</th>
+                                        <th>类型</th>
+                                        <th>金额</th>
+                                        <th>余额变动</th>
+                                        <th>备注</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${fundSource.map(tx => {
+                                        const isIncome = parseFloat(tx.amount) > 0;
+                                        return `
+                                            <tr>
+                                                <td class="text-xs text-gray-500">${formatDate(tx.created_at)}</td>
+                                                <td><span class="badge badge-${isIncome ? 'success' : 'warning'}">${txTypeMap[tx.transaction_type] || '其他'}</span></td>
+                                                <td class="${isIncome ? 'text-green-600' : 'text-red-600'} font-medium">
+                                                    ${isIncome ? '+' : ''}${formatMoney(tx.amount)}
+                                                </td>
+                                                <td class="text-xs">
+                                                    ${formatMoney(tx.balance_before)} → ${formatMoney(tx.balance_after)}
+                                                </td>
+                                                <td class="text-xs text-gray-500 max-w-[150px] truncate" title="${escapeHtml(tx.remark || '')}">${escapeHtml(tx.remark || '-')}</td>
+                                            </tr>
+                                        `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                        ` : '<div class="p-4 text-center text-gray-500 text-sm">暂无交易记录</div>'}
                     </div>
                 </div>
                 
                 ${t.remark ? `
-                    <div class="mt-4 bg-yellow-50 p-3 rounded">
-                        <div class="text-xs text-gray-500 mb-1">备注</div>
+                    <div class="bg-yellow-50 p-3 rounded-lg mb-4">
+                        <div class="text-xs text-gray-500 mb-1"><i class="fas fa-comment mr-1"></i>转账备注</div>
                         <div class="text-sm">${escapeHtml(t.remark)}</div>
                     </div>
                 ` : ''}
                 
-                <div class="flex justify-end mt-6">
+                <div class="flex justify-end">
                     <button onclick="closeModal()" class="btn btn-outline">关闭</button>
                 </div>
             </div>
-        `);
+        `, 'max-w-4xl');
     } catch (error) {
         alert('获取详情失败: ' + error.message);
     }

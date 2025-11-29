@@ -3261,7 +3261,7 @@ app.get('/api/v1/reports/transfers/summary', async (c) => {
   }
 })
 
-// 转账记录详情
+// 转账记录详情 - 包含双方IP和转出人资金来源
 app.get('/api/v1/reports/transfers/:transfer_id', async (c) => {
   const transfer_id = parseInt(c.req.param('transfer_id'))
 
@@ -3274,7 +3274,56 @@ app.get('/api/v1/reports/transfers/:transfer_id', async (c) => {
       return c.json({ success: false, message: '转账记录不存在' }, 404)
     }
 
-    return c.json({ success: true, data: record })
+    // 获取转出人资金来源（近期交易记录）
+    const fundSource = await c.env.DB.prepare(`
+      SELECT 
+        transaction_id,
+        order_no,
+        transaction_type,
+        amount,
+        balance_before,
+        balance_after,
+        created_at,
+        remark
+      FROM transactions 
+      WHERE user_id = ? 
+        AND created_at <= ?
+        AND audit_status = 1
+      ORDER BY created_at DESC
+      LIMIT 20
+    `).bind(record.from_user_id, record.created_at).all()
+
+    // 获取转出人账户汇总信息
+    const fromUserInfo = await c.env.DB.prepare(`
+      SELECT 
+        user_id, username, nickname, balance,
+        total_deposit, total_withdraw, total_bet,
+        COALESCE((SELECT SUM(amount) FROM transactions WHERE user_id = u.user_id AND transaction_type = 1 AND audit_status = 1), 0) as total_deposit_amount,
+        COALESCE((SELECT SUM(ABS(amount)) FROM transactions WHERE user_id = u.user_id AND transaction_type = 2 AND audit_status = 1), 0) as total_withdraw_amount,
+        COALESCE((SELECT SUM(bonus_amount) FROM bonus_records WHERE user_id = u.user_id AND audit_status = 1), 0) as total_bonus,
+        COALESCE((SELECT SUM(amount) FROM transfer_records WHERE from_user_id = u.user_id AND status = 1), 0) as total_transfer_out,
+        COALESCE((SELECT SUM(actual_amount) FROM transfer_records WHERE to_user_id = u.user_id AND status = 1), 0) as total_transfer_in
+      FROM users u
+      WHERE user_id = ?
+    `).bind(record.from_user_id).first()
+
+    // 获取接收人账户信息
+    const toUserInfo = await c.env.DB.prepare(`
+      SELECT user_id, username, nickname, balance
+      FROM users WHERE user_id = ?
+    `).bind(record.to_user_id).first()
+
+    return c.json({ 
+      success: true, 
+      data: {
+        ...record,
+        from_ip: record.ip_address,  // 转出人IP (兼容旧字段名)
+        to_ip: record.to_ip_address, // 接收人IP
+        from_user_info: fromUserInfo || {},
+        to_user_info: toUserInfo || {},
+        fund_source: fundSource.results || []
+      }
+    })
   } catch (error) {
     return c.json({ success: false, message: '获取转账详情失败' }, 500)
   }
