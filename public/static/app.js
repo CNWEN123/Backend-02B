@@ -130,6 +130,7 @@ const menuConfig = [
         children: [
             { id: 'system-admins', title: '账号管理', page: 'system-admins' },
             { id: 'system-roles', title: '角色权限', page: 'system-roles' },
+            { id: 'system-2fa', title: '2FA设置', page: 'system-2fa', badge: 'NEW' },
             { id: 'system-logs', title: '操作日志', page: 'system-logs' },
             { id: 'system-login-logs', title: '登录日志', page: 'system-login-logs' }
         ]
