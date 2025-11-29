@@ -79,13 +79,21 @@ async function verifyToken(token: string, secret: string): Promise<any | null> {
     const keyData = encoder.encode(secret)
     const key = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['verify'])
     
-    const signatureStr = atob(encodedSignature.replace(/-/g, '+').replace(/_/g, '/'))
+    // 添加Base64 padding
+    let sig = encodedSignature.replace(/-/g, '+').replace(/_/g, '/')
+    while (sig.length % 4) sig += '='
+    
+    const signatureStr = atob(sig)
     const signatureBytes = new Uint8Array([...signatureStr].map(c => c.charCodeAt(0)))
     
     const isValid = await crypto.subtle.verify('HMAC', key, signatureBytes, encoder.encode(data))
     if (!isValid) return null
     
-    const payload = JSON.parse(atob(encodedPayload))
+    // 添加Base64 padding到payload
+    let pay = encodedPayload
+    while (pay.length % 4) pay += '='
+    
+    const payload = JSON.parse(atob(pay))
     if (payload.exp && payload.exp < Date.now()) return null
     
     return payload
