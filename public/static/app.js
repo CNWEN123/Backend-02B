@@ -362,6 +362,7 @@ async function apiRequest(endpoint, options = {}) {
 // ==================== 仪表盘 ====================
 async function renderDashboard() {
     const content = document.getElementById('pageContent');
+    const { startDate, endDate } = getDefaultDateRange();
     
     try {
         const [statsRes, trendsRes] = await Promise.all([
@@ -371,8 +372,28 @@ async function renderDashboard() {
         
         const stats = statsRes.data;
         const trends = trendsRes.data;
+        currentReportData.dashboard = { stats, trends };
         
         content.innerHTML = `
+            <!-- 时间查询区域 -->
+            <div class="card mb-6">
+                <div class="card-header flex flex-col md:flex-row md:items-center justify-between gap-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white">
+                    <h3 class="text-lg font-semibold"><i class="fas fa-tachometer-alt mr-2"></i>综合数据仪表盘</h3>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <div class="flex items-center gap-2">
+                            <label class="text-sm opacity-80">开始:</label>
+                            <input type="date" id="DashboardStartDate" value="${startDate}" class="form-input text-sm py-1 text-gray-800">
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <label class="text-sm opacity-80">结束:</label>
+                            <input type="date" id="DashboardEndDate" value="${endDate}" class="form-input text-sm py-1 text-gray-800">
+                        </div>
+                        <button onclick="queryDashboardHistory()" class="btn bg-white text-blue-600 text-sm py-1 hover:bg-blue-50"><i class="fas fa-search mr-1"></i>查询历史</button>
+                        <button onclick="exportDashboard()" class="btn bg-green-500 text-white text-sm py-1 hover:bg-green-600"><i class="fas fa-file-excel mr-1"></i>导出数据</button>
+                    </div>
+                </div>
+            </div>
+            
             <!-- 核心指标卡片 -->
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
                 <!-- 总营收 -->
@@ -611,6 +632,145 @@ function initDashboardCharts(trends) {
     }
 }
 
+// 仪表盘历史数据查询
+async function queryDashboardHistory() {
+    const startDate = document.getElementById('DashboardStartDate')?.value || getDefaultDateRange().startDate;
+    const endDate = document.getElementById('DashboardEndDate')?.value || getDefaultDateRange().endDate;
+    
+    try {
+        const res = await apiRequest(`/dashboard/history?start_date=${startDate}&end_date=${endDate}`);
+        const data = res.data || {};
+        currentReportData.dashboardHistory = data;
+        
+        // 显示历史数据统计弹窗
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+        modal.id = 'dashboardHistoryModal';
+        modal.innerHTML = `
+            <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] overflow-y-auto m-4">
+                <div class="card-header flex items-center justify-between sticky top-0 bg-white z-10">
+                    <span><i class="fas fa-history mr-2 text-blue-500"></i>历史数据查询 (${startDate} ~ ${endDate})</span>
+                    <button onclick="document.getElementById('dashboardHistoryModal').remove()" class="text-gray-500 hover:text-gray-700">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="p-6">
+                    <!-- 汇总统计 -->
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                        <div class="bg-green-50 rounded-lg p-4 text-center">
+                            <div class="text-sm text-gray-600">总存款</div>
+                            <div class="text-xl font-bold text-green-600">${formatMoney(data.total_deposit || 0)}</div>
+                        </div>
+                        <div class="bg-orange-50 rounded-lg p-4 text-center">
+                            <div class="text-sm text-gray-600">总提款</div>
+                            <div class="text-xl font-bold text-orange-600">${formatMoney(data.total_withdraw || 0)}</div>
+                        </div>
+                        <div class="bg-blue-50 rounded-lg p-4 text-center">
+                            <div class="text-sm text-gray-600">总投注</div>
+                            <div class="text-xl font-bold text-blue-600">${formatMoney(data.total_bet || 0)}</div>
+                        </div>
+                        <div class="bg-${(data.company_profit || 0) >= 0 ? 'green' : 'red'}-50 rounded-lg p-4 text-center">
+                            <div class="text-sm text-gray-600">公司盈利</div>
+                            <div class="text-xl font-bold text-${(data.company_profit || 0) >= 0 ? 'green' : 'red'}-600">${formatMoney(data.company_profit || 0)}</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 详细数据表格 -->
+                    <div class="overflow-x-auto">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>日期</th>
+                                    <th>存款</th>
+                                    <th>提款</th>
+                                    <th>投注额</th>
+                                    <th>有效投注</th>
+                                    <th>玩家输赢</th>
+                                    <th>公司盈利</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${(data.daily_data || []).length === 0 ? '<tr><td colspan="7" class="text-center text-gray-500 py-4">暂无数据</td></tr>' :
+                                (data.daily_data || []).map(d => `
+                                    <tr>
+                                        <td>${d.date}</td>
+                                        <td class="text-green-600">${formatMoney(d.deposit)}</td>
+                                        <td class="text-orange-600">${formatMoney(d.withdraw)}</td>
+                                        <td>${formatMoney(d.total_bet)}</td>
+                                        <td>${formatMoney(d.valid_bet)}</td>
+                                        <td class="${parseFloat(d.player_win_loss) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(d.player_win_loss)}</td>
+                                        <td class="${parseFloat(d.company_profit) >= 0 ? 'text-green-600' : 'text-red-600'} font-bold">${formatMoney(d.company_profit)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="mt-4 flex justify-end">
+                        <button onclick="exportDashboardHistory()" class="btn btn-success"><i class="fas fa-file-excel mr-1"></i>导出此数据</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        
+    } catch (error) {
+        alert('查询失败: ' + error.message);
+    }
+}
+
+// 仪表盘数据导出
+function exportDashboard() {
+    const data = currentReportData.dashboard || {};
+    const stats = data.stats || {};
+    const exportData = [{
+        date: new Date().toISOString().split('T')[0],
+        today_profit: stats.todayProfit || 0,
+        total_players: stats.totalPlayers || 0,
+        today_deposit: stats.todayDeposit || 0,
+        today_withdraw: stats.todayWithdraw || 0,
+        today_bet: stats.todayBet || 0,
+        today_bet_count: stats.todayBetCount || 0,
+        total_balance: stats.totalBalance || 0,
+        pending_withdraw: stats.pendingWithdraw || 0,
+        pending_alerts: stats.pendingAlerts || 0
+    }];
+    
+    exportToExcel(exportData, [
+        { key: 'date', label: '日期' },
+        { key: 'today_profit', label: '今日盈亏' },
+        { key: 'total_players', label: '总玩家数' },
+        { key: 'today_deposit', label: '今日存款' },
+        { key: 'today_withdraw', label: '今日提款' },
+        { key: 'today_bet', label: '今日投注' },
+        { key: 'today_bet_count', label: '今日单量' },
+        { key: 'total_balance', label: '资金池余额' },
+        { key: 'pending_withdraw', label: '待审核提款数' },
+        { key: 'pending_alerts', label: '待处理预警数' }
+    ], '仪表盘数据');
+}
+
+// 导出仪表盘历史数据
+function exportDashboardHistory() {
+    const data = currentReportData.dashboardHistory || {};
+    const exportData = data.daily_data || [];
+    
+    if (exportData.length === 0) {
+        alert('暂无数据可导出');
+        return;
+    }
+    
+    exportToExcel(exportData, [
+        { key: 'date', label: '日期' },
+        { key: 'deposit', label: '存款' },
+        { key: 'withdraw', label: '提款' },
+        { key: 'total_bet', label: '投注额' },
+        { key: 'valid_bet', label: '有效投注' },
+        { key: 'player_win_loss', label: '玩家输赢' },
+        { key: 'company_profit', label: '公司盈利' }
+    ], '仪表盘历史数据');
+}
+
 // ==================== 玩家管理 ====================
 async function renderPlayers() {
     const content = document.getElementById('pageContent');
@@ -768,19 +928,140 @@ async function renderPlayersOnline() {
     }
 }
 
-function renderPlayerStats() {
+async function renderPlayerStats() {
     const content = document.getElementById('pageContent');
+    
     content.innerHTML = `
         <div class="card">
-            <div class="card-header">玩家统计分析</div>
-            <div class="card-body">
-                <div class="text-center text-gray-500 py-10">
-                    <i class="fas fa-chart-line text-4xl mb-4"></i>
-                    <p>玩家LTV分析功能开发中...</p>
-                </div>
+            <div class="card-header flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <h3 class="text-lg font-semibold"><i class="fas fa-chart-pie mr-2 text-teal-500"></i>玩家统计分析</h3>
+                ${renderDateRangeSelector('PlayerStats')}
+            </div>
+            <div class="p-4" id="playerStatsContent">
+                <div class="text-center text-gray-500 py-10"><i class="fas fa-spinner fa-spin mr-2"></i>加载中...</div>
             </div>
         </div>
     `;
+    
+    await queryPlayerStats();
+}
+
+async function queryPlayerStats() {
+    const startDate = document.getElementById('PlayerStatsStartDate')?.value || getDefaultDateRange().startDate;
+    const endDate = document.getElementById('PlayerStatsEndDate')?.value || getDefaultDateRange().endDate;
+    const container = document.getElementById('playerStatsContent');
+    
+    try {
+        const res = await apiRequest(`/reports/player-stats?start_date=${startDate}&end_date=${endDate}`);
+        const data = res.data || {};
+        currentReportData.playerStats = data;
+        
+        const summary = data.summary || { total_players: 0, active_players: 0, new_players: 0, total_bet: 0, total_win_loss: 0, avg_bet: 0 };
+        const vipStats = data.vip_distribution || [];
+        const topPlayers = data.top_players || [];
+        
+        container.innerHTML = `
+            <!-- 统计汇总卡片 -->
+            <div class="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
+                <div class="bg-teal-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">总玩家数</div>
+                    <div class="text-xl font-bold text-teal-600">${formatNumber(summary.total_players)}</div>
+                </div>
+                <div class="bg-blue-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">活跃玩家</div>
+                    <div class="text-xl font-bold text-blue-600">${formatNumber(summary.active_players)}</div>
+                </div>
+                <div class="bg-green-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">新增玩家</div>
+                    <div class="text-xl font-bold text-green-600">${formatNumber(summary.new_players)}</div>
+                </div>
+                <div class="bg-purple-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">总投注额</div>
+                    <div class="text-xl font-bold text-purple-600">${formatMoney(summary.total_bet)}</div>
+                </div>
+                <div class="bg-${summary.total_win_loss >= 0 ? 'green' : 'red'}-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">玩家总输赢</div>
+                    <div class="text-xl font-bold text-${summary.total_win_loss >= 0 ? 'green' : 'red'}-600">${formatMoney(summary.total_win_loss)}</div>
+                </div>
+                <div class="bg-orange-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">人均投注</div>
+                    <div class="text-xl font-bold text-orange-600">${formatMoney(summary.avg_bet)}</div>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- VIP等级分布 -->
+                <div class="card">
+                    <div class="card-header bg-purple-50 text-purple-700">
+                        <i class="fas fa-crown mr-2"></i>VIP等级分布
+                    </div>
+                    <div class="p-4">
+                        ${vipStats.length === 0 ? '<div class="text-center text-gray-500 py-4">暂无数据</div>' : `
+                        <table class="data-table">
+                            <thead><tr><th>VIP等级</th><th>玩家数</th><th>占比</th><th>总投注</th></tr></thead>
+                            <tbody>
+                                ${vipStats.map(v => `
+                                    <tr>
+                                        <td><span class="badge badge-info">VIP ${v.vip_level}</span></td>
+                                        <td>${formatNumber(v.player_count)}</td>
+                                        <td>${v.percentage || 0}%</td>
+                                        <td>${formatMoney(v.total_bet)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                        `}
+                    </div>
+                </div>
+                
+                <!-- 活跃玩家排行 -->
+                <div class="card">
+                    <div class="card-header bg-green-50 text-green-700">
+                        <i class="fas fa-fire mr-2"></i>投注活跃榜 TOP 10
+                    </div>
+                    <div class="p-4 max-h-[350px] overflow-y-auto">
+                        ${topPlayers.length === 0 ? '<div class="text-center text-gray-500 py-4">暂无数据</div>' : 
+                        topPlayers.slice(0, 10).map((p, i) => `
+                            <div class="flex items-center justify-between p-2 ${i < 3 ? 'bg-green-50' : ''} rounded mb-2">
+                                <div class="flex items-center">
+                                    <span class="w-7 h-7 ${i < 3 ? 'bg-green-500 text-white' : 'bg-gray-200'} rounded-full flex items-center justify-center text-sm font-bold mr-3">${i + 1}</span>
+                                    <div>
+                                        <div class="font-medium">${escapeHtml(p.username || '')}</div>
+                                        <div class="text-xs text-gray-500">VIP${p.vip_level || 0} | 注单: ${p.bet_count || 0}</div>
+                                    </div>
+                                </div>
+                                <div class="text-right">
+                                    <div class="font-bold text-green-600">${formatMoney(p.total_bet)}</div>
+                                    <div class="text-xs ${parseFloat(p.total_win_loss) >= 0 ? 'text-green-500' : 'text-red-500'}">${formatMoney(p.total_win_loss)}</div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        container.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+function exportPlayerStats() {
+    const data = currentReportData.playerStats || {};
+    const exportData = data.top_players || [];
+    
+    if (exportData.length === 0) {
+        alert('暂无数据可导出');
+        return;
+    }
+    
+    exportToExcel(exportData, [
+        { key: 'username', label: '玩家账号' },
+        { key: 'vip_level', label: 'VIP等级' },
+        { key: 'agent_username', label: '所属代理' },
+        { key: 'bet_count', label: '注单数' },
+        { key: 'total_bet', label: '总投注' },
+        { key: 'total_win_loss', label: '输赢' }
+    ], '玩家统计');
 }
 
 // ==================== 代理管理 ====================
@@ -1774,137 +2055,293 @@ async function renderRiskAlerts() {
     }
 }
 
-// ==================== 报表中心 ====================
+// ==================== 报表中心 - 增强版 (时间查询 + 导出) ====================
+
+// 通用报表工具函数
+function getDefaultDateRange() {
+    const today = new Date().toISOString().split('T')[0];
+    const monthStart = today.slice(0, 8) + '01';
+    return { startDate: monthStart, endDate: today };
+}
+
+function renderDateRangeSelector(reportType, hasExport = true) {
+    const { startDate, endDate } = getDefaultDateRange();
+    return `
+        <div class="flex flex-wrap items-center gap-2">
+            <div class="flex items-center gap-2">
+                <label class="text-sm text-gray-600">开始:</label>
+                <input type="date" id="${reportType}StartDate" value="${startDate}" class="form-input text-sm py-1">
+            </div>
+            <div class="flex items-center gap-2">
+                <label class="text-sm text-gray-600">结束:</label>
+                <input type="date" id="${reportType}EndDate" value="${endDate}" class="form-input text-sm py-1">
+            </div>
+            <button onclick="query${reportType}()" class="btn btn-primary text-sm py-1"><i class="fas fa-search mr-1"></i>查询</button>
+            ${hasExport ? `<button onclick="export${reportType}()" class="btn btn-success text-sm py-1"><i class="fas fa-file-excel mr-1"></i>导出Excel</button>` : ''}
+        </div>
+    `;
+}
+
+// 通用导出函数
+function exportToExcel(data, columns, filename) {
+    if (!data || data.length === 0) {
+        alert('暂无数据可导出');
+        return;
+    }
+    
+    // 生成CSV内容
+    const headers = columns.map(c => c.label).join(',');
+    const rows = data.map(row => 
+        columns.map(c => {
+            let val = c.key.split('.').reduce((o, k) => o?.[k], row);
+            if (c.format) val = c.format(val, row);
+            // 处理特殊字符
+            val = String(val ?? '').replace(/"/g, '""');
+            return `"${val}"`;
+        }).join(',')
+    ).join('\n');
+    
+    const csvContent = '\uFEFF' + headers + '\n' + rows; // BOM for Excel
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${filename}_${new Date().toISOString().slice(0,10)}.csv`;
+    link.click();
+}
+
+// 存储当前报表数据用于导出
+let currentReportData = {};
+
+// 结算报表
 async function renderSettlementReport() {
     const content = document.getElementById('pageContent');
+    const { startDate, endDate } = getDefaultDateRange();
+    
+    content.innerHTML = `
+        <div class="card">
+            <div class="card-header flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <h3 class="text-lg font-semibold"><i class="fas fa-file-invoice-dollar mr-2 text-blue-500"></i>结算报表</h3>
+                ${renderDateRangeSelector('Settlement')}
+            </div>
+            <div class="p-4" id="settlementContent">
+                <div class="text-center text-gray-500 py-10"><i class="fas fa-spinner fa-spin mr-2"></i>加载中...</div>
+            </div>
+        </div>
+    `;
+    
+    await querySettlement();
+}
+
+async function querySettlement() {
+    const startDate = document.getElementById('SettlementStartDate')?.value || getDefaultDateRange().startDate;
+    const endDate = document.getElementById('SettlementEndDate')?.value || getDefaultDateRange().endDate;
+    const container = document.getElementById('settlementContent');
     
     try {
-        const res = await apiRequest('/reports/settlement');
+        const res = await apiRequest(`/reports/settlement?start_date=${startDate}&end_date=${endDate}`);
         const list = res.data || [];
+        currentReportData.settlement = list;
         
-        content.innerHTML = `
-            <div class="card">
-                <div class="card-header flex items-center justify-between">
-                    <span>结算报表</span>
-                    <div class="flex space-x-2">
-                        <input type="date" class="px-3 py-2 border rounded-lg text-sm">
-                        <input type="date" class="px-3 py-2 border rounded-lg text-sm">
-                        <button class="btn btn-primary text-sm">查询</button>
-                        <button class="btn btn-success text-sm"><i class="fas fa-file-excel mr-1"></i>导出</button>
-                    </div>
+        // 计算汇总
+        const summary = list.reduce((acc, r) => ({
+            bet_count: acc.bet_count + (r.bet_count || 0),
+            total_bet: acc.total_bet + parseFloat(r.total_bet || 0),
+            valid_bet: acc.valid_bet + parseFloat(r.valid_bet || 0),
+            total_win_loss: acc.total_win_loss + parseFloat(r.total_win_loss || 0),
+            company_profit: acc.company_profit + parseFloat(r.company_profit || 0)
+        }), { bet_count: 0, total_bet: 0, valid_bet: 0, total_win_loss: 0, company_profit: 0 });
+        
+        container.innerHTML = `
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+                <div class="bg-blue-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">总注单数</div>
+                    <div class="text-xl font-bold text-blue-600">${formatNumber(summary.bet_count)}</div>
                 </div>
-                <div class="card-body">
-                    <div class="overflow-x-auto">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>日期</th>
-                                    <th>注单数</th>
-                                    <th>总投注</th>
-                                    <th>有效投注</th>
-                                    <th>玩家盈亏</th>
-                                    <th>公司盈亏</th>
-                                    <th>杀数(%)</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${list.map(r => `
-                                    <tr>
-                                        <td>${r.date}</td>
-                                        <td>${r.bet_count}</td>
-                                        <td>¥ ${formatNumber(r.total_bet)}</td>
-                                        <td>¥ ${formatNumber(r.valid_bet)}</td>
-                                        <td class="${r.total_win_loss >= 0 ? 'text-green-600' : 'text-red-600'}">
-                                            ${r.total_win_loss >= 0 ? '+' : ''}${formatNumber(r.total_win_loss)}
-                                        </td>
-                                        <td class="${r.company_profit >= 0 ? 'text-green-600' : 'text-red-600'} font-bold">
-                                            ${r.company_profit >= 0 ? '+' : ''}${formatNumber(r.company_profit)}
-                                        </td>
-                                        <td>${r.valid_bet > 0 ? ((r.company_profit / r.valid_bet) * 100).toFixed(2) : 0}%</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>
+                <div class="bg-indigo-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">总投注额</div>
+                    <div class="text-xl font-bold text-indigo-600">${formatMoney(summary.total_bet)}</div>
                 </div>
+                <div class="bg-purple-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">有效投注</div>
+                    <div class="text-xl font-bold text-purple-600">${formatMoney(summary.valid_bet)}</div>
+                </div>
+                <div class="bg-${summary.total_win_loss >= 0 ? 'green' : 'red'}-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">玩家盈亏</div>
+                    <div class="text-xl font-bold text-${summary.total_win_loss >= 0 ? 'green' : 'red'}-600">${formatMoney(summary.total_win_loss)}</div>
+                </div>
+                <div class="bg-${summary.company_profit >= 0 ? 'green' : 'red'}-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">公司盈利</div>
+                    <div class="text-xl font-bold text-${summary.company_profit >= 0 ? 'green' : 'red'}-600">${formatMoney(summary.company_profit)}</div>
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>日期</th>
+                            <th>注单数</th>
+                            <th>总投注</th>
+                            <th>有效投注</th>
+                            <th>玩家盈亏</th>
+                            <th>公司盈亏</th>
+                            <th>杀数(%)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${list.length === 0 ? '<tr><td colspan="7" class="text-center text-gray-500 py-4">暂无数据</td></tr>' : 
+                        list.map(r => `
+                            <tr>
+                                <td>${r.date || r.report_date || '-'}</td>
+                                <td>${formatNumber(r.bet_count)}</td>
+                                <td>${formatMoney(r.total_bet)}</td>
+                                <td>${formatMoney(r.valid_bet)}</td>
+                                <td class="${parseFloat(r.total_win_loss) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(r.total_win_loss)}</td>
+                                <td class="${parseFloat(r.company_profit) >= 0 ? 'text-green-600' : 'text-red-600'} font-bold">${formatMoney(r.company_profit)}</td>
+                                <td>${r.valid_bet > 0 ? ((r.company_profit / r.valid_bet) * 100).toFixed(2) : 0}%</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
             </div>
         `;
     } catch (error) {
-        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        container.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
     }
 }
 
+function exportSettlement() {
+    exportToExcel(currentReportData.settlement, [
+        { key: 'date', label: '日期' },
+        { key: 'bet_count', label: '注单数' },
+        { key: 'total_bet', label: '总投注' },
+        { key: 'valid_bet', label: '有效投注' },
+        { key: 'total_win_loss', label: '玩家盈亏' },
+        { key: 'company_profit', label: '公司盈亏' },
+        { key: 'kill_rate', label: '杀数(%)', format: (v, r) => r.valid_bet > 0 ? ((r.company_profit / r.valid_bet) * 100).toFixed(2) : 0 }
+    ], '结算报表');
+}
+
+// 盈亏排行
 async function renderRanking() {
     const content = document.getElementById('pageContent');
+    const { startDate, endDate } = getDefaultDateRange();
+    
+    content.innerHTML = `
+        <div class="card mb-4">
+            <div class="card-header flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <h3 class="text-lg font-semibold"><i class="fas fa-trophy mr-2 text-yellow-500"></i>盈亏排行榜</h3>
+                ${renderDateRangeSelector('Ranking')}
+            </div>
+        </div>
+        <div id="rankingContent">
+            <div class="text-center text-gray-500 py-10"><i class="fas fa-spinner fa-spin mr-2"></i>加载中...</div>
+        </div>
+    `;
+    
+    await queryRanking();
+}
+
+async function queryRanking() {
+    const startDate = document.getElementById('RankingStartDate')?.value || getDefaultDateRange().startDate;
+    const endDate = document.getElementById('RankingEndDate')?.value || getDefaultDateRange().endDate;
+    const container = document.getElementById('rankingContent');
     
     try {
         const [profitRes, lossRes] = await Promise.all([
-            apiRequest('/reports/ranking?type=loss&limit=20'),
-            apiRequest('/reports/ranking?type=profit&limit=20')
+            apiRequest(`/reports/ranking?type=profit&limit=20&start_date=${startDate}&end_date=${endDate}`),
+            apiRequest(`/reports/ranking?type=loss&limit=20&start_date=${startDate}&end_date=${endDate}`)
         ]);
         
-        content.innerHTML = `
+        const profitList = profitRes.data || [];
+        const lossList = lossRes.data || [];
+        currentReportData.ranking = { profit: profitList, loss: lossList };
+        
+        container.innerHTML = `
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <!-- 盈利榜 -->
                 <div class="card">
-                    <div class="card-header bg-green-50 text-green-700">
-                        <i class="fas fa-trophy mr-2"></i>盈利排行榜 TOP 20
+                    <div class="card-header bg-green-50 text-green-700 flex items-center justify-between">
+                        <span><i class="fas fa-trophy mr-2"></i>盈利排行榜 TOP 20</span>
+                        <button onclick="exportRankingProfit()" class="btn btn-sm bg-green-500 text-white hover:bg-green-600"><i class="fas fa-download mr-1"></i>导出</button>
                     </div>
-                    <div class="card-body">
-                        <div class="space-y-2">
-                            ${profitRes.data.map((p, i) => `
-                                <div class="flex items-center justify-between p-2 ${i < 3 ? 'bg-green-50' : ''} rounded">
-                                    <div class="flex items-center">
-                                        <span class="w-6 h-6 ${i < 3 ? 'bg-green-500 text-white' : 'bg-gray-200'} rounded-full flex items-center justify-center text-sm font-bold mr-3">
-                                            ${i + 1}
-                                        </span>
-                                        <div>
-                                            <div class="font-medium">${p.username}</div>
-                                            <div class="text-xs text-gray-500">VIP${p.vip_level} | ${p.agent_username || '-'}</div>
-                                        </div>
-                                    </div>
-                                    <div class="text-right">
-                                        <div class="text-green-600 font-bold">+${formatNumber(Math.abs(p.total_win_loss))}</div>
-                                        <div class="text-xs text-gray-500">投注: ${formatNumber(p.total_bet)}</div>
+                    <div class="p-4 max-h-[500px] overflow-y-auto">
+                        ${profitList.length === 0 ? '<div class="text-center text-gray-500 py-4">暂无数据</div>' : 
+                        profitList.map((p, i) => `
+                            <div class="flex items-center justify-between p-2 ${i < 3 ? 'bg-green-50' : ''} rounded mb-2">
+                                <div class="flex items-center">
+                                    <span class="w-7 h-7 ${i < 3 ? 'bg-green-500 text-white' : 'bg-gray-200'} rounded-full flex items-center justify-center text-sm font-bold mr-3">${i + 1}</span>
+                                    <div>
+                                        <div class="font-medium">${escapeHtml(p.username || '')}</div>
+                                        <div class="text-xs text-gray-500">VIP${p.vip_level || 0} | ${escapeHtml(p.agent_username || '-')}</div>
                                     </div>
                                 </div>
-                            `).join('')}
-                        </div>
+                                <div class="text-right">
+                                    <div class="text-green-600 font-bold">+${formatMoney(Math.abs(p.total_win_loss))}</div>
+                                    <div class="text-xs text-gray-500">投注: ${formatMoney(p.total_bet)}</div>
+                                </div>
+                            </div>
+                        `).join('')}
                     </div>
                 </div>
-                
-                <!-- 亏损榜 -->
                 <div class="card">
-                    <div class="card-header bg-red-50 text-red-700">
-                        <i class="fas fa-chart-line mr-2"></i>亏损排行榜 TOP 20
+                    <div class="card-header bg-red-50 text-red-700 flex items-center justify-between">
+                        <span><i class="fas fa-chart-line mr-2"></i>亏损排行榜 TOP 20</span>
+                        <button onclick="exportRankingLoss()" class="btn btn-sm bg-red-500 text-white hover:bg-red-600"><i class="fas fa-download mr-1"></i>导出</button>
                     </div>
-                    <div class="card-body">
-                        <div class="space-y-2">
-                            ${lossRes.data.map((p, i) => `
-                                <div class="flex items-center justify-between p-2 ${i < 3 ? 'bg-red-50' : ''} rounded">
-                                    <div class="flex items-center">
-                                        <span class="w-6 h-6 ${i < 3 ? 'bg-red-500 text-white' : 'bg-gray-200'} rounded-full flex items-center justify-center text-sm font-bold mr-3">
-                                            ${i + 1}
-                                        </span>
-                                        <div>
-                                            <div class="font-medium">${p.username}</div>
-                                            <div class="text-xs text-gray-500">VIP${p.vip_level} | ${p.agent_username || '-'}</div>
-                                        </div>
-                                    </div>
-                                    <div class="text-right">
-                                        <div class="text-red-600 font-bold">${formatNumber(p.total_win_loss)}</div>
-                                        <div class="text-xs text-gray-500">投注: ${formatNumber(p.total_bet)}</div>
+                    <div class="p-4 max-h-[500px] overflow-y-auto">
+                        ${lossList.length === 0 ? '<div class="text-center text-gray-500 py-4">暂无数据</div>' : 
+                        lossList.map((p, i) => `
+                            <div class="flex items-center justify-between p-2 ${i < 3 ? 'bg-red-50' : ''} rounded mb-2">
+                                <div class="flex items-center">
+                                    <span class="w-7 h-7 ${i < 3 ? 'bg-red-500 text-white' : 'bg-gray-200'} rounded-full flex items-center justify-center text-sm font-bold mr-3">${i + 1}</span>
+                                    <div>
+                                        <div class="font-medium">${escapeHtml(p.username || '')}</div>
+                                        <div class="text-xs text-gray-500">VIP${p.vip_level || 0} | ${escapeHtml(p.agent_username || '-')}</div>
                                     </div>
                                 </div>
-                            `).join('')}
-                        </div>
+                                <div class="text-right">
+                                    <div class="text-red-600 font-bold">${formatMoney(p.total_win_loss)}</div>
+                                    <div class="text-xs text-gray-500">投注: ${formatMoney(p.total_bet)}</div>
+                                </div>
+                            </div>
+                        `).join('')}
                     </div>
                 </div>
             </div>
         `;
     } catch (error) {
-        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        container.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
     }
+}
+
+function exportRanking() {
+    const allData = [...(currentReportData.ranking?.profit || []), ...(currentReportData.ranking?.loss || [])];
+    exportToExcel(allData, [
+        { key: 'username', label: '用户名' },
+        { key: 'vip_level', label: 'VIP等级' },
+        { key: 'agent_username', label: '代理' },
+        { key: 'total_bet', label: '投注额' },
+        { key: 'total_win_loss', label: '盈亏' }
+    ], '盈亏排行');
+}
+
+function exportRankingProfit() {
+    exportToExcel(currentReportData.ranking?.profit || [], [
+        { key: 'username', label: '用户名' },
+        { key: 'vip_level', label: 'VIP等级' },
+        { key: 'agent_username', label: '代理' },
+        { key: 'total_bet', label: '投注额' },
+        { key: 'total_win_loss', label: '盈利金额' }
+    ], '盈利排行榜');
+}
+
+function exportRankingLoss() {
+    exportToExcel(currentReportData.ranking?.loss || [], [
+        { key: 'username', label: '用户名' },
+        { key: 'vip_level', label: 'VIP等级' },
+        { key: 'agent_username', label: '代理' },
+        { key: 'total_bet', label: '投注额' },
+        { key: 'total_win_loss', label: '亏损金额' }
+    ], '亏损排行榜');
 }
 
 // ==================== 公告管理 ====================
@@ -3113,117 +3550,289 @@ async function renderLimitGroups() {
 // 游戏报表
 async function renderGameReport() {
     const content = document.getElementById('pageContent');
-    const today = new Date().toISOString().split('T')[0];
-    const monthStart = today.slice(0, 8) + '01';
+    
+    content.innerHTML = `
+        <div class="card">
+            <div class="card-header flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <h3 class="text-lg font-semibold"><i class="fas fa-gamepad mr-2 text-purple-500"></i>游戏报表</h3>
+                ${renderDateRangeSelector('Game')}
+            </div>
+            <div class="p-4" id="gameReportContent">
+                <div class="text-center text-gray-500 py-10"><i class="fas fa-spinner fa-spin mr-2"></i>加载中...</div>
+            </div>
+        </div>
+    `;
+    
+    await queryGame();
+}
+
+async function queryGame() {
+    const startDate = document.getElementById('GameStartDate')?.value || getDefaultDateRange().startDate;
+    const endDate = document.getElementById('GameEndDate')?.value || getDefaultDateRange().endDate;
+    const container = document.getElementById('gameReportContent');
     
     try {
-        const data = await apiRequest(`/reports/game?start_date=${monthStart}&end_date=${today}`);
+        const data = await apiRequest(`/reports/game?start_date=${startDate}&end_date=${endDate}`);
         const list = data.data || [];
+        currentReportData.game = list;
         
-        content.innerHTML = `
-            <div class="card">
-                <div class="card-header"><h3 class="text-lg font-semibold"><i class="fas fa-gamepad mr-2"></i>游戏报表</h3></div>
-                <div class="p-4">
-                    <table class="data-table">
-                        <thead><tr><th>游戏类型</th><th>注单数</th><th>总投注</th><th>有效投注</th><th>玩家输赢</th><th>公司利润</th></tr></thead>
-                        <tbody>
-                            ${list.length === 0 ? '<tr><td colspan="6" class="text-center text-gray-500 py-4">暂无数据</td></tr>' : 
-                            list.map(r => `
-                                <tr>
-                                    <td><span class="badge badge-info">${escapeHtml(r.game_type || '')}</span></td>
-                                    <td>${r.bet_count || 0}</td>
-                                    <td>${formatMoney(r.total_bet)}</td>
-                                    <td>${formatMoney(r.valid_bet)}</td>
-                                    <td class="${parseFloat(r.total_win_loss) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(r.total_win_loss)}</td>
-                                    <td class="${parseFloat(r.company_profit) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(r.company_profit)}</td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
+        // 计算汇总
+        const summary = list.reduce((acc, r) => ({
+            bet_count: acc.bet_count + (r.bet_count || 0),
+            total_bet: acc.total_bet + parseFloat(r.total_bet || 0),
+            valid_bet: acc.valid_bet + parseFloat(r.valid_bet || 0),
+            total_win_loss: acc.total_win_loss + parseFloat(r.total_win_loss || 0),
+            company_profit: acc.company_profit + parseFloat(r.company_profit || 0)
+        }), { bet_count: 0, total_bet: 0, valid_bet: 0, total_win_loss: 0, company_profit: 0 });
+        
+        container.innerHTML = `
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+                <div class="bg-purple-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">游戏类型</div>
+                    <div class="text-xl font-bold text-purple-600">${list.length}</div>
+                </div>
+                <div class="bg-blue-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">总注单</div>
+                    <div class="text-xl font-bold text-blue-600">${formatNumber(summary.bet_count)}</div>
+                </div>
+                <div class="bg-indigo-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">总投注</div>
+                    <div class="text-xl font-bold text-indigo-600">${formatMoney(summary.total_bet)}</div>
+                </div>
+                <div class="bg-${summary.total_win_loss >= 0 ? 'green' : 'red'}-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">玩家盈亏</div>
+                    <div class="text-xl font-bold text-${summary.total_win_loss >= 0 ? 'green' : 'red'}-600">${formatMoney(summary.total_win_loss)}</div>
+                </div>
+                <div class="bg-${summary.company_profit >= 0 ? 'green' : 'red'}-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">公司利润</div>
+                    <div class="text-xl font-bold text-${summary.company_profit >= 0 ? 'green' : 'red'}-600">${formatMoney(summary.company_profit)}</div>
                 </div>
             </div>
+            <table class="data-table">
+                <thead><tr><th>游戏类型</th><th>注单数</th><th>总投注</th><th>有效投注</th><th>玩家输赢</th><th>公司利润</th><th>杀数(%)</th></tr></thead>
+                <tbody>
+                    ${list.length === 0 ? '<tr><td colspan="7" class="text-center text-gray-500 py-4">暂无数据</td></tr>' : 
+                    list.map(r => `
+                        <tr>
+                            <td><span class="badge badge-info">${escapeHtml(r.game_type || '')}</span></td>
+                            <td>${formatNumber(r.bet_count || 0)}</td>
+                            <td>${formatMoney(r.total_bet)}</td>
+                            <td>${formatMoney(r.valid_bet)}</td>
+                            <td class="${parseFloat(r.total_win_loss) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(r.total_win_loss)}</td>
+                            <td class="${parseFloat(r.company_profit) >= 0 ? 'text-green-600' : 'text-red-600'} font-bold">${formatMoney(r.company_profit)}</td>
+                            <td>${r.valid_bet > 0 ? ((r.company_profit / r.valid_bet) * 100).toFixed(2) : 0}%</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
         `;
     } catch (error) {
-        content.innerHTML = '<div class="text-center text-red-500 py-10">加载失败: ' + escapeHtml(error.message) + '</div>';
+        container.innerHTML = '<div class="text-center text-red-500 py-10">加载失败: ' + escapeHtml(error.message) + '</div>';
     }
+}
+
+function exportGame() {
+    exportToExcel(currentReportData.game, [
+        { key: 'game_type', label: '游戏类型' },
+        { key: 'bet_count', label: '注单数' },
+        { key: 'total_bet', label: '总投注' },
+        { key: 'valid_bet', label: '有效投注' },
+        { key: 'total_win_loss', label: '玩家输赢' },
+        { key: 'company_profit', label: '公司利润' }
+    ], '游戏报表');
 }
 
 // 盈亏日报
 async function renderDailyReport() {
     const content = document.getElementById('pageContent');
-    const today = new Date().toISOString().split('T')[0];
-    const monthStart = today.slice(0, 8) + '01';
+    
+    content.innerHTML = `
+        <div class="card">
+            <div class="card-header flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <h3 class="text-lg font-semibold"><i class="fas fa-calendar-day mr-2 text-orange-500"></i>盈亏日报</h3>
+                ${renderDateRangeSelector('Daily')}
+            </div>
+            <div class="p-4" id="dailyReportContent">
+                <div class="text-center text-gray-500 py-10"><i class="fas fa-spinner fa-spin mr-2"></i>加载中...</div>
+            </div>
+        </div>
+    `;
+    
+    await queryDaily();
+}
+
+async function queryDaily() {
+    const startDate = document.getElementById('DailyStartDate')?.value || getDefaultDateRange().startDate;
+    const endDate = document.getElementById('DailyEndDate')?.value || getDefaultDateRange().endDate;
+    const container = document.getElementById('dailyReportContent');
     
     try {
-        const data = await apiRequest(`/reports/daily?start_date=${monthStart}&end_date=${today}`);
+        const data = await apiRequest(`/reports/daily?start_date=${startDate}&end_date=${endDate}`);
         const list = data.data || [];
+        currentReportData.daily = list;
         
-        content.innerHTML = `
-            <div class="card">
-                <div class="card-header"><h3 class="text-lg font-semibold"><i class="fas fa-calendar-day mr-2"></i>盈亏日报</h3></div>
-                <div class="p-4">
-                    <table class="data-table">
-                        <thead><tr><th>日期</th><th>注单数</th><th>总投注</th><th>有效投注</th><th>玩家输赢</th><th>公司利润</th></tr></thead>
-                        <tbody>
-                            ${list.length === 0 ? '<tr><td colspan="6" class="text-center text-gray-500 py-4">暂无数据</td></tr>' : 
-                            list.map(r => `
-                                <tr>
-                                    <td>${r.report_date}</td>
-                                    <td>${r.bet_count || 0}</td>
-                                    <td>${formatMoney(r.total_bet)}</td>
-                                    <td>${formatMoney(r.valid_bet)}</td>
-                                    <td class="${parseFloat(r.player_win_loss) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(r.player_win_loss)}</td>
-                                    <td class="${parseFloat(r.company_profit) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(r.company_profit)}</td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
+        // 计算汇总
+        const summary = list.reduce((acc, r) => ({
+            bet_count: acc.bet_count + (r.bet_count || 0),
+            total_bet: acc.total_bet + parseFloat(r.total_bet || 0),
+            valid_bet: acc.valid_bet + parseFloat(r.valid_bet || 0),
+            player_win_loss: acc.player_win_loss + parseFloat(r.player_win_loss || 0),
+            company_profit: acc.company_profit + parseFloat(r.company_profit || 0)
+        }), { bet_count: 0, total_bet: 0, valid_bet: 0, player_win_loss: 0, company_profit: 0 });
+        
+        container.innerHTML = `
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+                <div class="bg-orange-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">统计天数</div>
+                    <div class="text-xl font-bold text-orange-600">${list.length} 天</div>
+                </div>
+                <div class="bg-blue-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">总注单</div>
+                    <div class="text-xl font-bold text-blue-600">${formatNumber(summary.bet_count)}</div>
+                </div>
+                <div class="bg-indigo-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">总投注</div>
+                    <div class="text-xl font-bold text-indigo-600">${formatMoney(summary.total_bet)}</div>
+                </div>
+                <div class="bg-${summary.player_win_loss >= 0 ? 'green' : 'red'}-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">玩家盈亏</div>
+                    <div class="text-xl font-bold text-${summary.player_win_loss >= 0 ? 'green' : 'red'}-600">${formatMoney(summary.player_win_loss)}</div>
+                </div>
+                <div class="bg-${summary.company_profit >= 0 ? 'green' : 'red'}-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">公司利润</div>
+                    <div class="text-xl font-bold text-${summary.company_profit >= 0 ? 'green' : 'red'}-600">${formatMoney(summary.company_profit)}</div>
                 </div>
             </div>
+            <table class="data-table">
+                <thead><tr><th>日期</th><th>注单数</th><th>总投注</th><th>有效投注</th><th>玩家输赢</th><th>公司利润</th><th>杀数(%)</th></tr></thead>
+                <tbody>
+                    ${list.length === 0 ? '<tr><td colspan="7" class="text-center text-gray-500 py-4">暂无数据</td></tr>' : 
+                    list.map(r => `
+                        <tr>
+                            <td>${r.report_date}</td>
+                            <td>${formatNumber(r.bet_count || 0)}</td>
+                            <td>${formatMoney(r.total_bet)}</td>
+                            <td>${formatMoney(r.valid_bet)}</td>
+                            <td class="${parseFloat(r.player_win_loss) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(r.player_win_loss)}</td>
+                            <td class="${parseFloat(r.company_profit) >= 0 ? 'text-green-600' : 'text-red-600'} font-bold">${formatMoney(r.company_profit)}</td>
+                            <td>${r.valid_bet > 0 ? ((r.company_profit / r.valid_bet) * 100).toFixed(2) : 0}%</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
         `;
     } catch (error) {
-        content.innerHTML = '<div class="text-center text-red-500 py-10">加载失败: ' + escapeHtml(error.message) + '</div>';
+        container.innerHTML = '<div class="text-center text-red-500 py-10">加载失败: ' + escapeHtml(error.message) + '</div>';
     }
+}
+
+function exportDaily() {
+    exportToExcel(currentReportData.daily, [
+        { key: 'report_date', label: '日期' },
+        { key: 'bet_count', label: '注单数' },
+        { key: 'total_bet', label: '总投注' },
+        { key: 'valid_bet', label: '有效投注' },
+        { key: 'player_win_loss', label: '玩家输赢' },
+        { key: 'company_profit', label: '公司利润' }
+    ], '盈亏日报');
 }
 
 // 代理业绩
 async function renderAgentPerformance() {
     const content = document.getElementById('pageContent');
-    const today = new Date().toISOString().split('T')[0];
-    const monthStart = today.slice(0, 8) + '01';
+    
+    content.innerHTML = `
+        <div class="card">
+            <div class="card-header flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <h3 class="text-lg font-semibold"><i class="fas fa-user-tie mr-2 text-indigo-500"></i>代理业绩报表</h3>
+                ${renderDateRangeSelector('Agent')}
+            </div>
+            <div class="p-4" id="agentPerformanceContent">
+                <div class="text-center text-gray-500 py-10"><i class="fas fa-spinner fa-spin mr-2"></i>加载中...</div>
+            </div>
+        </div>
+    `;
+    
+    await queryAgent();
+}
+
+async function queryAgent() {
+    const startDate = document.getElementById('AgentStartDate')?.value || getDefaultDateRange().startDate;
+    const endDate = document.getElementById('AgentEndDate')?.value || getDefaultDateRange().endDate;
+    const container = document.getElementById('agentPerformanceContent');
     
     try {
-        const data = await apiRequest(`/reports/agent-performance?start_date=${monthStart}&end_date=${today}`);
+        const data = await apiRequest(`/reports/agent-performance?start_date=${startDate}&end_date=${endDate}`);
         const list = data.data || [];
+        currentReportData.agent = list;
         
-        content.innerHTML = `
-            <div class="card">
-                <div class="card-header"><h3 class="text-lg font-semibold"><i class="fas fa-user-tie mr-2"></i>代理业绩报表</h3></div>
-                <div class="p-4">
-                    <table class="data-table">
-                        <thead><tr><th>代理账号</th><th>昵称</th><th>层级</th><th>玩家数</th><th>投注额</th><th>有效投注</th><th>输赢</th><th>公司利润</th></tr></thead>
-                        <tbody>
-                            ${list.length === 0 ? '<tr><td colspan="8" class="text-center text-gray-500 py-4">暂无数据</td></tr>' : 
-                            list.map(a => `
-                                <tr>
-                                    <td class="font-mono">${escapeHtml(a.agent_username || '')}</td>
-                                    <td>${escapeHtml(a.nickname || '')}</td>
-                                    <td>${getLevelBadge(a.level)}</td>
-                                    <td>${a.player_count || 0}</td>
-                                    <td>${formatMoney(a.total_bet)}</td>
-                                    <td>${formatMoney(a.valid_bet)}</td>
-                                    <td class="${parseFloat(a.total_win_loss) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(a.total_win_loss)}</td>
-                                    <td class="${parseFloat(a.company_profit) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(a.company_profit)}</td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
+        // 计算汇总
+        const summary = list.reduce((acc, a) => ({
+            player_count: acc.player_count + (a.player_count || 0),
+            total_bet: acc.total_bet + parseFloat(a.total_bet || 0),
+            valid_bet: acc.valid_bet + parseFloat(a.valid_bet || 0),
+            total_win_loss: acc.total_win_loss + parseFloat(a.total_win_loss || 0),
+            company_profit: acc.company_profit + parseFloat(a.company_profit || 0)
+        }), { player_count: 0, total_bet: 0, valid_bet: 0, total_win_loss: 0, company_profit: 0 });
+        
+        container.innerHTML = `
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+                <div class="bg-indigo-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">代理数量</div>
+                    <div class="text-xl font-bold text-indigo-600">${list.length}</div>
+                </div>
+                <div class="bg-blue-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">总玩家数</div>
+                    <div class="text-xl font-bold text-blue-600">${formatNumber(summary.player_count)}</div>
+                </div>
+                <div class="bg-purple-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">总投注</div>
+                    <div class="text-xl font-bold text-purple-600">${formatMoney(summary.total_bet)}</div>
+                </div>
+                <div class="bg-${summary.total_win_loss >= 0 ? 'green' : 'red'}-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">玩家盈亏</div>
+                    <div class="text-xl font-bold text-${summary.total_win_loss >= 0 ? 'green' : 'red'}-600">${formatMoney(summary.total_win_loss)}</div>
+                </div>
+                <div class="bg-${summary.company_profit >= 0 ? 'green' : 'red'}-50 rounded-lg p-3 text-center">
+                    <div class="text-sm text-gray-600">公司利润</div>
+                    <div class="text-xl font-bold text-${summary.company_profit >= 0 ? 'green' : 'red'}-600">${formatMoney(summary.company_profit)}</div>
                 </div>
             </div>
+            <table class="data-table">
+                <thead><tr><th>代理账号</th><th>昵称</th><th>层级</th><th>玩家数</th><th>投注额</th><th>有效投注</th><th>输赢</th><th>公司利润</th></tr></thead>
+                <tbody>
+                    ${list.length === 0 ? '<tr><td colspan="8" class="text-center text-gray-500 py-4">暂无数据</td></tr>' : 
+                    list.map(a => `
+                        <tr>
+                            <td class="font-mono">${escapeHtml(a.agent_username || '')}</td>
+                            <td>${escapeHtml(a.nickname || '')}</td>
+                            <td>${getLevelBadge(a.level)}</td>
+                            <td>${formatNumber(a.player_count || 0)}</td>
+                            <td>${formatMoney(a.total_bet)}</td>
+                            <td>${formatMoney(a.valid_bet)}</td>
+                            <td class="${parseFloat(a.total_win_loss) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(a.total_win_loss)}</td>
+                            <td class="${parseFloat(a.company_profit) >= 0 ? 'text-green-600' : 'text-red-600'} font-bold">${formatMoney(a.company_profit)}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
         `;
     } catch (error) {
-        content.innerHTML = '<div class="text-center text-red-500 py-10">加载失败: ' + escapeHtml(error.message) + '</div>';
+        container.innerHTML = '<div class="text-center text-red-500 py-10">加载失败: ' + escapeHtml(error.message) + '</div>';
     }
+}
+
+function exportAgent() {
+    exportToExcel(currentReportData.agent, [
+        { key: 'agent_username', label: '代理账号' },
+        { key: 'nickname', label: '昵称' },
+        { key: 'level', label: '层级' },
+        { key: 'player_count', label: '玩家数' },
+        { key: 'total_bet', label: '投注额' },
+        { key: 'valid_bet', label: '有效投注' },
+        { key: 'total_win_loss', label: '输赢' },
+        { key: 'company_profit', label: '公司利润' }
+    ], '代理业绩');
 }
 
 // 角色权限管理 - 增强版
@@ -3563,6 +4172,7 @@ const permissionStructure = {
     'menu': { name: '菜单权限', icon: 'fa-bars', color: 'indigo' },
     'dashboard': { name: '仪表盘', icon: 'fa-tachometer-alt', color: 'blue', parent: 'menu:dashboard' },
     'player': { name: '玩家管理', icon: 'fa-users', color: 'green', parent: 'menu:hierarchy' },
+    'player_stats': { name: '玩家统计', icon: 'fa-chart-pie', color: 'green', parent: 'menu:hierarchy' },
     'agent': { name: '代理管理', icon: 'fa-user-tie', color: 'green', parent: 'menu:hierarchy' },
     'finance_transaction': { name: '交易记录', icon: 'fa-exchange-alt', color: 'yellow', parent: 'menu:finance' },
     'finance_deposit': { name: '存款管理', icon: 'fa-plus-circle', color: 'yellow', parent: 'menu:finance' },
@@ -3574,7 +4184,11 @@ const permissionStructure = {
     'risk_rule': { name: '风控规则', icon: 'fa-shield-alt', color: 'red', parent: 'menu:risk' },
     'risk_alert': { name: '风控告警', icon: 'fa-exclamation-triangle', color: 'red', parent: 'menu:risk' },
     'risk_limit': { name: '限红设置', icon: 'fa-hand-paper', color: 'red', parent: 'menu:risk' },
-    'report': { name: '报表中心', icon: 'fa-chart-bar', color: 'teal', parent: 'menu:report' },
+    'report_settlement': { name: '结算报表', icon: 'fa-file-invoice-dollar', color: 'teal', parent: 'menu:report' },
+    'report_ranking': { name: '盈亏排行', icon: 'fa-trophy', color: 'teal', parent: 'menu:report' },
+    'report_game': { name: '游戏报表', icon: 'fa-gamepad', color: 'teal', parent: 'menu:report' },
+    'report_daily': { name: '盈亏日报', icon: 'fa-calendar-day', color: 'teal', parent: 'menu:report' },
+    'report_agent': { name: '代理业绩', icon: 'fa-user-tie', color: 'teal', parent: 'menu:report' },
     'content_announcement': { name: '公告管理', icon: 'fa-bullhorn', color: 'orange', parent: 'menu:content' },
     'system_admin': { name: '账号管理', icon: 'fa-user-cog', color: 'gray', parent: 'menu:system' },
     'system_role': { name: '角色权限', icon: 'fa-user-shield', color: 'gray', parent: 'menu:system' },
@@ -3589,12 +4203,12 @@ const permissionStructure = {
 // 一级菜单映射
 const menuMapping = {
     'menu:dashboard': { name: '仪表盘', icon: 'fa-tachometer-alt', modules: ['dashboard'] },
-    'menu:hierarchy': { name: '层级管理', icon: 'fa-sitemap', modules: ['player', 'agent'] },
+    'menu:hierarchy': { name: '层级管理', icon: 'fa-sitemap', modules: ['player', 'player_stats', 'agent'] },
     'menu:finance': { name: '财务管理', icon: 'fa-yen-sign', modules: ['finance_transaction', 'finance_deposit', 'finance_withdraw', 'finance_turnover'] },
     'menu:bet': { name: '注单管理', icon: 'fa-dice', modules: ['bet'] },
     'menu:commission': { name: '洗码管理', icon: 'fa-percentage', modules: ['commission_scheme', 'commission_record'] },
     'menu:risk': { name: '风控管理', icon: 'fa-shield-alt', modules: ['risk_rule', 'risk_alert', 'risk_limit'] },
-    'menu:report': { name: '报表中心', icon: 'fa-chart-bar', modules: ['report'] },
+    'menu:report': { name: '报表中心', icon: 'fa-chart-bar', modules: ['report_settlement', 'report_ranking', 'report_game', 'report_daily', 'report_agent'] },
     'menu:content': { name: '内容管理', icon: 'fa-newspaper', modules: ['content_announcement'] },
     'menu:system': { name: '系统控制', icon: 'fa-cogs', modules: ['system_admin', 'system_role', 'system_2fa', 'system_whitelist', 'system_log'] },
     'menu:studio': { name: '现场运营', icon: 'fa-video', modules: ['studio_dealer', 'studio_table', 'studio_shift'] }

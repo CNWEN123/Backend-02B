@@ -2866,6 +2866,130 @@ app.get('/api/v1/reports/daily', async (c) => {
   }
 })
 
+// 玩家统计报表API
+app.get('/api/v1/reports/player-stats', async (c) => {
+  const start_date = c.req.query('start_date') || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  const end_date = c.req.query('end_date') || new Date().toISOString().split('T')[0]
+
+  try {
+    // 获取汇总数据
+    const summaryResult = await c.env.DB.prepare(`
+      SELECT 
+        (SELECT COUNT(*) FROM users) as total_players,
+        (SELECT COUNT(DISTINCT user_id) FROM bets WHERE DATE(created_at) BETWEEN ? AND ? AND bet_status = 1) as active_players,
+        (SELECT COUNT(*) FROM users WHERE DATE(created_at) BETWEEN ? AND ?) as new_players,
+        COALESCE((SELECT SUM(bet_amount) FROM bets WHERE DATE(created_at) BETWEEN ? AND ? AND bet_status = 1), 0) as total_bet,
+        COALESCE((SELECT SUM(win_loss_amount) FROM bets WHERE DATE(created_at) BETWEEN ? AND ? AND bet_status = 1), 0) as total_win_loss
+    `).bind(start_date, end_date, start_date, end_date, start_date, end_date, start_date, end_date).first()
+
+    // 计算人均投注
+    const avgBet = summaryResult?.active_players > 0 ? 
+      (summaryResult?.total_bet || 0) / summaryResult?.active_players : 0
+
+    // 获取VIP等级分布
+    const vipResult = await c.env.DB.prepare(`
+      SELECT 
+        u.vip_level,
+        COUNT(*) as player_count,
+        ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM users WHERE vip_level IS NOT NULL), 1) as percentage,
+        COALESCE(SUM(b.total_bet), 0) as total_bet
+      FROM users u
+      LEFT JOIN (
+        SELECT user_id, SUM(bet_amount) as total_bet 
+        FROM bets 
+        WHERE DATE(created_at) BETWEEN ? AND ? AND bet_status = 1
+        GROUP BY user_id
+      ) b ON u.user_id = b.user_id
+      WHERE u.vip_level IS NOT NULL
+      GROUP BY u.vip_level
+      ORDER BY u.vip_level ASC
+    `).bind(start_date, end_date).all()
+
+    // 获取活跃玩家TOP榜
+    const topPlayersResult = await c.env.DB.prepare(`
+      SELECT 
+        u.user_id,
+        u.username,
+        u.vip_level,
+        a.agent_username,
+        COUNT(*) as bet_count,
+        COALESCE(SUM(b.bet_amount), 0) as total_bet,
+        COALESCE(SUM(b.win_loss_amount), 0) as total_win_loss
+      FROM bets b
+      JOIN users u ON b.user_id = u.user_id
+      LEFT JOIN agents a ON u.agent_id = a.agent_id
+      WHERE DATE(b.created_at) BETWEEN ? AND ? AND b.bet_status = 1
+      GROUP BY b.user_id
+      ORDER BY total_bet DESC
+      LIMIT 50
+    `).bind(start_date, end_date).all()
+
+    return c.json({ 
+      success: true, 
+      data: {
+        summary: {
+          total_players: summaryResult?.total_players || 0,
+          active_players: summaryResult?.active_players || 0,
+          new_players: summaryResult?.new_players || 0,
+          total_bet: summaryResult?.total_bet || 0,
+          total_win_loss: summaryResult?.total_win_loss || 0,
+          avg_bet: avgBet
+        },
+        vip_distribution: vipResult.results || [],
+        top_players: topPlayersResult.results || []
+      }
+    })
+  } catch (error) {
+    console.error('获取玩家统计失败:', error)
+    return c.json({ success: false, message: '获取玩家统计失败' }, 500)
+  }
+})
+
+// 仪表盘历史数据查询API
+app.get('/api/v1/dashboard/history', async (c) => {
+  const start_date = c.req.query('start_date') || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  const end_date = c.req.query('end_date') || new Date().toISOString().split('T')[0]
+
+  try {
+    // 获取每日数据
+    const dailyResult = await c.env.DB.prepare(`
+      SELECT 
+        DATE(b.created_at) as date,
+        COALESCE((SELECT SUM(amount) FROM transactions WHERE transaction_type = 1 AND audit_status = 1 AND DATE(created_at) = DATE(b.created_at)), 0) as deposit,
+        COALESCE((SELECT SUM(ABS(amount)) FROM transactions WHERE transaction_type = 2 AND audit_status = 1 AND DATE(created_at) = DATE(b.created_at)), 0) as withdraw,
+        COALESCE(SUM(b.bet_amount), 0) as total_bet,
+        COALESCE(SUM(b.valid_bet_amount), 0) as valid_bet,
+        COALESCE(SUM(b.win_loss_amount), 0) as player_win_loss,
+        -COALESCE(SUM(b.win_loss_amount), 0) as company_profit
+      FROM bets b
+      WHERE DATE(b.created_at) BETWEEN ? AND ? AND b.bet_status = 1
+      GROUP BY DATE(b.created_at)
+      ORDER BY date DESC
+    `).bind(start_date, end_date).all()
+
+    // 计算汇总
+    const daily_data = dailyResult.results || []
+    const total_deposit = daily_data.reduce((sum: number, d: any) => sum + parseFloat(d.deposit || 0), 0)
+    const total_withdraw = daily_data.reduce((sum: number, d: any) => sum + parseFloat(d.withdraw || 0), 0)
+    const total_bet = daily_data.reduce((sum: number, d: any) => sum + parseFloat(d.total_bet || 0), 0)
+    const company_profit = daily_data.reduce((sum: number, d: any) => sum + parseFloat(d.company_profit || 0), 0)
+
+    return c.json({ 
+      success: true, 
+      data: {
+        total_deposit,
+        total_withdraw,
+        total_bet,
+        company_profit,
+        daily_data
+      }
+    })
+  } catch (error) {
+    console.error('获取仪表盘历史数据失败:', error)
+    return c.json({ success: false, message: '获取仪表盘历史数据失败' }, 500)
+  }
+})
+
 // ==================== 收款方式管理API ====================
 
 // 获取收款方式列表
