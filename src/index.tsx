@@ -578,6 +578,54 @@ app.get('/api/v1/players', async (c) => {
   }
 })
 
+// 在线玩家 - 必须在 :user_id 路由之前定义
+app.get('/api/v1/players/online', async (c) => {
+  try {
+    const result = await c.env.DB.prepare(`
+      SELECT u.user_id, u.username, u.nickname, u.balance, u.vip_level,
+             'BAC-001' as current_table, '百家乐' as game_type,
+             a.agent_username
+      FROM users u 
+      LEFT JOIN agents a ON u.agent_id = a.agent_id
+      WHERE u.status = 1 
+      ORDER BY u.last_login_at DESC 
+      LIMIT 100
+    `).all()
+
+    return c.json({
+      success: true,
+      data: {
+        total: result.results?.length || 0,
+        list: result.results || []
+      }
+    })
+  } catch (error) {
+    return c.json({ success: false, message: '获取在线玩家失败' }, 500)
+  }
+})
+
+// 玩家LTV统计 - 必须在 :user_id 路由之前定义
+app.get('/api/v1/players/stats/ltv', async (c) => {
+  try {
+    const result = await c.env.DB.prepare(`
+      SELECT 
+        u.user_id, u.username, u.nickname, u.vip_level,
+        u.total_deposit, u.total_withdraw, u.total_bet, u.total_win_loss,
+        (u.total_deposit - u.total_withdraw) as ltv,
+        a.agent_username,
+        u.created_at
+      FROM users u
+      LEFT JOIN agents a ON u.agent_id = a.agent_id
+      ORDER BY ltv DESC
+      LIMIT 100
+    `).all()
+
+    return c.json({ success: true, data: result.results || [] })
+  } catch (error) {
+    return c.json({ success: false, message: '获取LTV统计失败' }, 500)
+  }
+})
+
 // 玩家详情 - 包含完整统计
 app.get('/api/v1/players/:user_id', async (c) => {
   const user_id = c.req.param('user_id')
@@ -839,54 +887,6 @@ app.get('/api/v1/players/:user_id/bets', async (c) => {
   }
 })
 
-// 在线玩家
-app.get('/api/v1/players/online', async (c) => {
-  try {
-    const result = await c.env.DB.prepare(`
-      SELECT u.user_id, u.username, u.nickname, u.balance, u.vip_level,
-             'BAC-001' as current_table, '百家乐' as game_type,
-             a.agent_username
-      FROM users u 
-      LEFT JOIN agents a ON u.agent_id = a.agent_id
-      WHERE u.status = 1 
-      ORDER BY u.last_login_at DESC 
-      LIMIT 100
-    `).all()
-
-    return c.json({
-      success: true,
-      data: {
-        total: result.results?.length || 0,
-        list: result.results || []
-      }
-    })
-  } catch (error) {
-    return c.json({ success: false, message: '获取在线玩家失败' }, 500)
-  }
-})
-
-// 玩家LTV统计
-app.get('/api/v1/players/stats/ltv', async (c) => {
-  try {
-    const result = await c.env.DB.prepare(`
-      SELECT 
-        u.user_id, u.username, u.nickname, u.vip_level,
-        u.total_deposit, u.total_withdraw, u.total_bet, u.total_win_loss,
-        (u.total_deposit - u.total_withdraw) as ltv,
-        a.agent_username,
-        u.created_at
-      FROM users u
-      LEFT JOIN agents a ON u.agent_id = a.agent_id
-      ORDER BY ltv DESC
-      LIMIT 100
-    `).all()
-
-    return c.json({ success: true, data: result.results || [] })
-  } catch (error) {
-    return c.json({ success: false, message: '获取LTV统计失败' }, 500)
-  }
-})
-
 // ==================== 代理管理API ====================
 
 app.get('/api/v1/agents', async (c) => {
@@ -943,6 +943,35 @@ app.get('/api/v1/agents', async (c) => {
   } catch (error) {
     console.error('Agents list error:', error)
     return c.json({ success: false, message: '获取代理列表失败' }, 500)
+  }
+})
+
+// 代理树形结构 - 必须在 :agent_id 路由之前定义
+app.get('/api/v1/agents/tree', async (c) => {
+  try {
+    const agents = await c.env.DB.prepare(`
+      SELECT agent_id, agent_username, nickname, parent_agent_id, level, status, balance,
+             share_ratio, commission_ratio,
+             (SELECT COUNT(*) FROM users WHERE agent_id = agents.agent_id) as player_count,
+             (SELECT COALESCE(SUM(total_bet), 0) FROM users WHERE agent_id = agents.agent_id) as total_bet
+      FROM agents
+      ORDER BY level, agent_id
+    `).all()
+
+    const buildTree = (items: any[], parentId: number | null = null): any[] => {
+      return items
+        .filter(item => item.parent_agent_id === parentId)
+        .map(item => ({
+          ...item,
+          children: buildTree(items, item.agent_id)
+        }))
+    }
+
+    const tree = buildTree(agents.results || [])
+
+    return c.json({ success: true, data: tree })
+  } catch (error) {
+    return c.json({ success: false, message: '获取代理树失败' }, 500)
   }
 })
 
@@ -1053,35 +1082,6 @@ app.put('/api/v1/agents/:agent_id', async (c) => {
     return c.json({ success: true, message: '更新成功' })
   } catch (error) {
     return c.json({ success: false, message: '更新失败' }, 500)
-  }
-})
-
-// 代理树形结构
-app.get('/api/v1/agents/tree', async (c) => {
-  try {
-    const agents = await c.env.DB.prepare(`
-      SELECT agent_id, agent_username, nickname, parent_agent_id, level, status, balance,
-             share_ratio, commission_ratio,
-             (SELECT COUNT(*) FROM users WHERE agent_id = agents.agent_id) as player_count,
-             (SELECT COALESCE(SUM(total_bet), 0) FROM users WHERE agent_id = agents.agent_id) as total_bet
-      FROM agents
-      ORDER BY level, agent_id
-    `).all()
-
-    const buildTree = (items: any[], parentId: number | null = null): any[] => {
-      return items
-        .filter(item => item.parent_agent_id === parentId)
-        .map(item => ({
-          ...item,
-          children: buildTree(items, item.agent_id)
-        }))
-    }
-
-    const tree = buildTree(agents.results || [])
-
-    return c.json({ success: true, data: tree })
-  } catch (error) {
-    return c.json({ success: false, message: '获取代理树失败' }, 500)
   }
 })
 
@@ -1493,6 +1493,48 @@ app.get('/api/v1/bets', async (c) => {
   }
 })
 
+// 实时注单监控 - 必须在 :bet_id 路由之前定义
+app.get('/api/v1/bets/realtime', async (c) => {
+  try {
+    const result = await c.env.DB.prepare(`
+      SELECT b.*, u.username, u.nickname, u.vip_level
+      FROM bets b
+      LEFT JOIN users u ON b.user_id = u.user_id
+      WHERE b.bet_status = 0
+      ORDER BY b.created_at DESC
+      LIMIT 50
+    `).all()
+
+    return c.json({ success: true, data: result.results || [] })
+  } catch (error) {
+    return c.json({ success: false, message: '获取实时注单失败' }, 500)
+  }
+})
+
+// 特殊注单(三宝等高赔注单) - 必须在 :bet_id 路由之前定义
+app.get('/api/v1/bets/special', async (c) => {
+  try {
+    const result = await c.env.DB.prepare(`
+      SELECT b.*, u.username, u.nickname,
+             CASE 
+               WHEN b.bet_detail LIKE '%三宝%' OR b.bet_detail LIKE '%围骰%' THEN '三宝/围骰'
+               WHEN b.bet_detail LIKE '%对子%' THEN '对子'
+               WHEN b.odds > 5 THEN '高赔率'
+               ELSE '其他'
+             END as special_type
+      FROM bets b
+      LEFT JOIN users u ON b.user_id = u.user_id
+      WHERE b.odds > 2 OR b.bet_detail LIKE '%三宝%' OR b.bet_detail LIKE '%围骰%' OR b.bet_detail LIKE '%对子%'
+      ORDER BY b.created_at DESC
+      LIMIT 100
+    `).all()
+
+    return c.json({ success: true, data: result.results || [] })
+  } catch (error) {
+    return c.json({ success: false, message: '获取特殊注单失败' }, 500)
+  }
+})
+
 // 注单详情
 app.get('/api/v1/bets/:bet_id', async (c) => {
   const bet_id = c.req.param('bet_id')
@@ -1578,48 +1620,6 @@ app.post('/api/v1/bets/:bet_id/void', async (c) => {
     return c.json({ success: true, message: '注单已废除' })
   } catch (error) {
     return c.json({ success: false, message: '废除失败' }, 500)
-  }
-})
-
-// 实时注单监控
-app.get('/api/v1/bets/realtime', async (c) => {
-  try {
-    const result = await c.env.DB.prepare(`
-      SELECT b.*, u.username, u.nickname, u.vip_level
-      FROM bets b
-      LEFT JOIN users u ON b.user_id = u.user_id
-      WHERE b.bet_status = 0
-      ORDER BY b.created_at DESC
-      LIMIT 50
-    `).all()
-
-    return c.json({ success: true, data: result.results || [] })
-  } catch (error) {
-    return c.json({ success: false, message: '获取实时注单失败' }, 500)
-  }
-})
-
-// 特殊注单(三宝等高赔注单)
-app.get('/api/v1/bets/special', async (c) => {
-  try {
-    const result = await c.env.DB.prepare(`
-      SELECT b.*, u.username, u.nickname,
-             CASE 
-               WHEN b.bet_detail LIKE '%三宝%' OR b.bet_detail LIKE '%围骰%' THEN '三宝/围骰'
-               WHEN b.bet_detail LIKE '%对子%' THEN '对子'
-               WHEN b.odds > 5 THEN '高赔率'
-               ELSE '其他'
-             END as special_type
-      FROM bets b
-      LEFT JOIN users u ON b.user_id = u.user_id
-      WHERE b.odds > 2 OR b.bet_detail LIKE '%三宝%' OR b.bet_detail LIKE '%围骰%' OR b.bet_detail LIKE '%对子%'
-      ORDER BY b.created_at DESC
-      LIMIT 100
-    `).all()
-
-    return c.json({ success: true, data: result.results || [] })
-  } catch (error) {
-    return c.json({ success: false, message: '获取特殊注单失败' }, 500)
   }
 })
 
@@ -1984,11 +1984,11 @@ app.get('/api/v1/risk/limit-groups', async (c) => {
 app.get('/api/v1/risk/ip-analysis', async (c) => {
   try {
     const result = await c.env.DB.prepare(`
-      SELECT ip_address, COUNT(*) as user_count,
+      SELECT login_ip as ip_address, COUNT(*) as user_count,
              GROUP_CONCAT(DISTINCT user_id) as user_ids,
              MAX(created_at) as last_seen
       FROM user_login_logs
-      GROUP BY ip_address
+      GROUP BY login_ip
       HAVING COUNT(DISTINCT user_id) > 1
       ORDER BY user_count DESC
       LIMIT 100
@@ -2453,11 +2453,19 @@ app.get('/api/v1/admin/users', async (c) => {
 app.post('/api/v1/admin/users', async (c) => {
   const { username, password, nickname, role_id, ip_whitelist } = await c.req.json()
 
+  // 安全校验：密码必须提供且长度至少6位
+  if (!password || typeof password !== 'string' || password.length < 6) {
+    return c.json({ success: false, message: '密码长度至少6位' }, 400)
+  }
+
   try {
+    // 对密码进行哈希处理
+    const passwordHash = await hashPassword(password)
+    
     const result = await c.env.DB.prepare(`
       INSERT INTO admin_users (username, password_hash, nickname, role_id, ip_whitelist)
       VALUES (?, ?, ?, ?, ?)
-    `).bind(username, password || '123456', nickname || '', role_id || 2, ip_whitelist ? JSON.stringify(ip_whitelist) : null).run()
+    `).bind(username, passwordHash, nickname || '', role_id || 2, ip_whitelist ? JSON.stringify(ip_whitelist) : null).run()
 
     return c.json({ success: true, data: { admin_id: result.meta.last_row_id } })
   } catch (error: any) {

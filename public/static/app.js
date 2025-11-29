@@ -712,11 +712,11 @@ async function renderPlayersOnline() {
                                 ${list.map(player => `
                                     <tr>
                                         <td>${player.user_id}</td>
-                                        <td class="font-medium">${player.username}</td>
-                                        <td>${player.nickname || '-'}</td>
+                                        <td class="font-medium">${escapeHtml(player.username)}</td>
+                                        <td>${escapeHtml(player.nickname) || '-'}</td>
                                         <td class="text-green-600">¥ ${formatNumber(player.balance)}</td>
-                                        <td><span class="badge badge-info">${player.current_table}</span></td>
-                                        <td>${player.game_type}</td>
+                                        <td><span class="badge badge-info">${escapeHtml(player.current_table)}</span></td>
+                                        <td>${escapeHtml(player.game_type)}</td>
                                         <td><span class="badge badge-warning">VIP${player.vip_level}</span></td>
                                     </tr>
                                 `).join('')}
@@ -843,8 +843,8 @@ function renderTreeNode(nodes, level = 0) {
         <div class="ml-${level * 4} mb-2">
             <div class="flex items-center p-2 bg-white rounded shadow-sm">
                 <i class="fas fa-${level === 0 ? 'building' : level === 1 ? 'user-tie' : 'user'} text-${level === 0 ? 'purple' : level === 1 ? 'blue' : 'green'}-500 mr-2"></i>
-                <span class="font-medium">${node.agent_username}</span>
-                <span class="text-gray-400 text-sm ml-2">(${node.nickname || '-'})</span>
+                <span class="font-medium">${escapeHtml(node.agent_username)}</span>
+                <span class="text-gray-400 text-sm ml-2">(${escapeHtml(node.nickname) || '-'})</span>
                 ${getLevelBadge(node.level)}
                 <span class="text-gray-500 text-sm ml-auto">¥${formatNumber(node.balance)} | ${node.player_count || 0}人</span>
             </div>
@@ -904,8 +904,8 @@ async function renderTransactions() {
                                 ${list.map(tx => `
                                     <tr>
                                         <td>${getTransactionTypeBadge(tx.transaction_type)}</td>
-                                        <td class="font-mono text-sm">${tx.order_no}</td>
-                                        <td>${tx.username}</td>
+                                        <td class="font-mono text-sm">${escapeHtml(tx.order_no)}</td>
+                                        <td>${escapeHtml(tx.username)}</td>
                                         <td class="${tx.amount >= 0 ? 'text-green-600' : 'text-red-600'} font-medium">
                                             ${tx.amount >= 0 ? '+' : ''}${formatNumber(tx.amount)}
                                         </td>
@@ -1088,13 +1088,13 @@ async function renderBets() {
                                 ${list.map(bet => `
                                     <tr>
                                         <td>
-                                            <div class="font-mono text-sm">${bet.bet_no}</div>
+                                            <div class="font-mono text-sm">${escapeHtml(bet.bet_no)}</div>
                                             <div class="text-xs text-gray-500">${formatDate(bet.created_at)}</div>
                                         </td>
-                                        <td>${bet.username}</td>
+                                        <td>${escapeHtml(bet.username)}</td>
                                         <td>
-                                            <div>${bet.game_type}</div>
-                                            <div class="text-xs text-gray-500">${bet.table_code}</div>
+                                            <div>${escapeHtml(bet.game_type)}</div>
+                                            <div class="text-xs text-gray-500">${escapeHtml(bet.table_code)}</div>
                                         </td>
                                         <td>${formatBetDetail(bet.bet_detail)}</td>
                                         <td class="font-medium">¥ ${formatNumber(bet.bet_amount)}</td>
@@ -1289,10 +1289,10 @@ async function renderRiskAlerts() {
                                 ${list.map(alert => `
                                     <tr class="${alert.risk_level === 3 ? 'bg-red-50' : alert.risk_level === 2 ? 'bg-yellow-50' : ''}">
                                         <td>${formatDate(alert.created_at)}</td>
-                                        <td class="font-medium">${alert.username}</td>
-                                        <td>${alert.rule_name || alert.alert_type}</td>
+                                        <td class="font-medium">${escapeHtml(alert.username)}</td>
+                                        <td>${escapeHtml(alert.rule_name || alert.alert_type)}</td>
                                         <td>${getRiskLevelBadge(alert.risk_level)}</td>
-                                        <td class="text-sm text-gray-600">${alert.alert_detail || '-'}</td>
+                                        <td class="text-sm text-gray-600">${escapeHtml(alert.alert_detail) || '-'}</td>
                                         <td>${getAlertStatusBadge(alert.handle_status)}</td>
                                         <td>
                                             ${alert.handle_status === 0 ? `
@@ -1533,11 +1533,11 @@ async function renderAdmins() {
                             <tbody>
                                 ${list.map(admin => `
                                     <tr>
-                                        <td class="font-medium">${admin.username}</td>
-                                        <td>${admin.nickname || '-'}</td>
-                                        <td><span class="badge badge-info">${admin.role_name}</span></td>
+                                        <td class="font-medium">${escapeHtml(admin.username)}</td>
+                                        <td>${escapeHtml(admin.nickname) || '-'}</td>
+                                        <td><span class="badge badge-info">${escapeHtml(admin.role_name)}</span></td>
                                         <td>${admin.two_fa_enabled ? '<span class="text-green-500"><i class="fas fa-check-circle"></i> 已绑定</span>' : '<span class="text-gray-400">未绑定</span>'}</td>
-                                        <td class="font-mono text-sm">${admin.last_login_ip || '-'}</td>
+                                        <td class="font-mono text-sm">${escapeHtml(admin.last_login_ip) || '-'}</td>
                                         <td>${formatDate(admin.last_login_at)}</td>
                                         <td>${getStatusBadge(admin.status)}</td>
                                         <td>

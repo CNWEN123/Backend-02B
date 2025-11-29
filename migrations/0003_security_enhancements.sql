@@ -1,24 +1,23 @@
--- V2.1.1 安全增强 - 安全相关字段和配置
+-- V2.1.1 安全增强
 -- 真人荷官视讯后台管理系统
 
 -- =====================
--- 1. 管理员安全字段
+-- 0. 管理员安全字段扩展
 -- =====================
 
--- 添加二次密码字段 (用于敏感操作验证)
-ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS secondary_password VARCHAR(64);
+ALTER TABLE admin_users ADD COLUMN secondary_password VARCHAR(64);
+ALTER TABLE admin_users ADD COLUMN password_changed_at DATETIME;
+ALTER TABLE admin_users ADD COLUMN login_fail_count INTEGER DEFAULT 0;
+ALTER TABLE admin_users ADD COLUMN locked_until DATETIME;
 
--- 添加密码最后修改时间
-ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS password_changed_at DATETIME;
-
--- 添加登录失败次数 (用于防暴力破解)
-ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS login_fail_count INTEGER DEFAULT 0;
-
--- 添加账号锁定时间
-ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS locked_until DATETIME;
+-- 更新默认管理员密码为SHA-256哈希
+UPDATE admin_users SET 
+    password_hash = '8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92',
+    secondary_password = '8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92'
+WHERE password_hash LIKE '$2a$%' OR password_hash = '123456';
 
 -- =====================
--- 2. 安全审计增强
+-- 1. 安全审计增强
 -- =====================
 
 -- 添加索引优化审计日志查询
@@ -28,7 +27,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_ip_address ON audit_logs(ip_address);
 
 -- =====================
--- 3. 会话管理表
+-- 2. 会话管理表
 -- =====================
 
 CREATE TABLE IF NOT EXISTS admin_sessions (
@@ -47,7 +46,7 @@ CREATE INDEX IF NOT EXISTS idx_admin_sessions_admin_id ON admin_sessions(admin_i
 CREATE INDEX IF NOT EXISTS idx_admin_sessions_expires_at ON admin_sessions(expires_at);
 
 -- =====================
--- 4. 操作限流表
+-- 3. 操作限流表
 -- =====================
 
 CREATE TABLE IF NOT EXISTS rate_limits (
@@ -62,18 +61,7 @@ CREATE TABLE IF NOT EXISTS rate_limits (
 CREATE INDEX IF NOT EXISTS idx_rate_limits_window ON rate_limits(window_start);
 
 -- =====================
--- 5. 更新默认管理员密码为哈希值
--- =====================
-
--- 将明文密码 '123456' 更新为 SHA-256 哈希
--- SHA-256('123456') = '8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92'
-UPDATE admin_users 
-SET password_hash = '8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92',
-    secondary_password = '8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92'
-WHERE password_hash = '123456';
-
--- =====================
--- 6. 安全配置表
+-- 4. 安全配置表
 -- =====================
 
 CREATE TABLE IF NOT EXISTS security_config (
