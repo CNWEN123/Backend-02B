@@ -496,11 +496,11 @@ async function renderDashboard() {
                 <div class="card-header">快捷操作</div>
                 <div class="card-body">
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <button onclick="loadPage('finance-deposits')" class="p-4 bg-green-50 hover:bg-green-100 rounded-lg text-center transition">
+                        <button onclick="showManualAdjustment('deposit')" class="p-4 bg-green-50 hover:bg-green-100 rounded-lg text-center transition">
                             <i class="fas fa-plus-circle text-green-500 text-2xl mb-2"></i>
                             <p class="text-sm font-medium">人工存款</p>
                         </button>
-                        <button onclick="loadPage('finance-withdrawals')" class="p-4 bg-orange-50 hover:bg-orange-100 rounded-lg text-center transition">
+                        <button onclick="showManualAdjustment('withdraw')" class="p-4 bg-orange-50 hover:bg-orange-100 rounded-lg text-center transition">
                             <i class="fas fa-minus-circle text-orange-500 text-2xl mb-2"></i>
                             <p class="text-sm font-medium">人工提款</p>
                         </button>
@@ -1956,6 +1956,115 @@ async function togglePlayerStatus(userId, currentStatus) {
 function viewPlayer(userId) {
     // TODO: 打开玩家详情弹窗
     alert('查看玩家详情: ' + userId);
+}
+
+// 人工存取款
+function showManualAdjustment(type) {
+    const title = type === 'deposit' ? '人工存款（上分）' : '人工提款（下分）';
+    const btnClass = type === 'deposit' ? 'btn-success' : 'btn-danger';
+    const icon = type === 'deposit' ? 'fa-plus-circle' : 'fa-minus-circle';
+    
+    openModal(`
+        <div class="p-6" style="min-width: 400px;">
+            <h3 class="text-lg font-bold mb-4">
+                <i class="fas ${icon} mr-2 ${type === 'deposit' ? 'text-green-500' : 'text-orange-500'}"></i>
+                ${title}
+            </h3>
+            <form id="manualAdjustForm" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">玩家账号/ID <span class="text-red-500">*</span></label>
+                    <input type="text" id="adjustUserId" class="form-input w-full" placeholder="请输入玩家账号或ID" required>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">金额 <span class="text-red-500">*</span></label>
+                    <input type="number" id="adjustAmount" class="form-input w-full" placeholder="请输入金额" min="0.01" step="0.01" required>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">备注 <span class="text-red-500">*</span></label>
+                    <textarea id="adjustRemark" class="form-input w-full" rows="3" placeholder="请输入操作原因（如：活动赠送、误操作冲正等）" required></textarea>
+                </div>
+                <div class="flex justify-end gap-3 pt-4 border-t">
+                    <button type="button" onclick="closeModal()" class="btn btn-secondary">取消</button>
+                    <button type="submit" class="btn ${btnClass}">
+                        <i class="fas ${icon} mr-1"></i> 确认${type === 'deposit' ? '存款' : '提款'}
+                    </button>
+                </div>
+            </form>
+        </div>
+    `);
+    
+    // 绑定表单提交
+    document.getElementById('manualAdjustForm').onsubmit = async (e) => {
+        e.preventDefault();
+        await submitManualAdjustment(type);
+    };
+}
+
+async function submitManualAdjustment(type) {
+    const userIdInput = document.getElementById('adjustUserId').value.trim();
+    const amount = parseFloat(document.getElementById('adjustAmount').value);
+    const remark = document.getElementById('adjustRemark').value.trim();
+    
+    console.log('[ManualAdjust] Input:', { userIdInput, amount, type, remark });
+    
+    if (!userIdInput) {
+        alert('请输入玩家账号或ID');
+        return;
+    }
+    if (!amount || amount <= 0) {
+        alert('请输入有效金额');
+        return;
+    }
+    if (!remark) {
+        alert('请输入操作备注');
+        return;
+    }
+    
+    // 确认操作
+    const action = type === 'deposit' ? '存款' : '提款';
+    if (!confirm(`确认为玩家 ${userIdInput} 执行${action}操作？\n金额: ¥${amount.toFixed(2)}\n备注: ${remark}`)) {
+        return;
+    }
+    
+    try {
+        // 如果输入的不是纯数字，先查询玩家ID
+        let userId = userIdInput;
+        if (!/^\d+$/.test(userIdInput)) {
+            console.log('[ManualAdjust] Searching player by username:', userIdInput);
+            const searchRes = await apiRequest(`/players?username=${encodeURIComponent(userIdInput)}&size=1`);
+            console.log('[ManualAdjust] Search result:', searchRes);
+            if (!searchRes.data?.list?.length) {
+                alert('未找到该玩家账号');
+                return;
+            }
+            userId = searchRes.data.list[0].user_id;
+            console.log('[ManualAdjust] Found user_id:', userId);
+        }
+        
+        console.log('[ManualAdjust] Submitting request:', { user_id: parseInt(userId), amount, type, remark });
+        const res = await apiRequest('/finance/manual-adjustment', {
+            method: 'POST',
+            body: JSON.stringify({
+                user_id: parseInt(userId),
+                amount: amount,
+                type: type,
+                remark: remark
+            })
+        });
+        
+        console.log('[ManualAdjust] Response:', res);
+        
+        if (res.success) {
+            closeModal();
+            alert(`${action}成功！\n订单号: ${res.data?.order_no || ''}`);
+            loadPage('dashboard');
+        } else {
+            alert(`${action}失败: ${res.message || '未知错误'}`);
+        }
+    } catch (error) {
+        console.error('[ManualAdjust] Error:', error);
+        alert(`操作失败: ${error.message || '网络错误'}`);
+    }
 }
 
 // 踢线玩家
