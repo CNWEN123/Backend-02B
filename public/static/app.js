@@ -134,12 +134,14 @@ const menuConfig = [
         icon: 'fa-chart-bar', 
         title: '报表中心',
         children: [
+            { id: 'reports-bets', title: '注单明细', page: 'reports-bets', badge: 'NEW' },
             { id: 'reports-settlement', title: '结算报表', page: 'reports-settlement' },
+            { id: 'reports-profit', title: '盈利分成', page: 'reports-profit', badge: 'NEW' },
             { id: 'reports-ranking', title: '盈亏排行', page: 'reports-ranking' },
             { id: 'reports-game', title: '游戏报表', page: 'reports-game' },
             { id: 'reports-daily', title: '盈亏日报', page: 'reports-daily' },
             { id: 'reports-agent', title: '代理业绩', page: 'reports-agent' },
-            { id: 'reports-transfer', title: '转账记录', page: 'reports-transfer', badge: 'NEW' }
+            { id: 'reports-transfer', title: '转账记录', page: 'reports-transfer' }
         ]
     },
     { 
@@ -334,7 +336,9 @@ function loadPage(page) {
         'risk-alerts': { title: '风控预警', handler: renderRiskAlerts },
         'risk-rules': { title: '风控规则', handler: renderRiskRules },
         'risk-limit-groups': { title: '限红组', handler: renderLimitGroups },
+        'reports-bets': { title: '注单明细', handler: renderBetDetails },
         'reports-settlement': { title: '结算报表', handler: renderSettlementReport },
+        'reports-profit': { title: '盈利分成', handler: renderProfitSharing },
         'reports-ranking': { title: '盈亏排行', handler: renderRanking },
         'reports-game': { title: '游戏报表', handler: renderGameReport },
         'reports-daily': { title: '盈亏日报', handler: renderDailyReport },
@@ -5300,6 +5304,556 @@ function exportDaily() {
         { key: 'deposit_amount', label: '存款' },
         { key: 'withdraw_amount', label: '取款' }
     ], '盈亏日报');
+}
+
+// ==================== 注单明细报表 ====================
+async function renderBetDetails() {
+    const content = document.getElementById('pageContent');
+    const { startDate, endDate } = getDefaultDateRange();
+    
+    // 加载筛选选项
+    let shareholderOptions = '<option value="">全部股东</option>';
+    let agentOptions = '<option value="">全部代理</option>';
+    let gameTypeOptions = '<option value="">全部游戏</option>';
+    try {
+        const [shareholderRes, agentRes, gameTypeRes] = await Promise.all([
+            apiRequest('/reports/shareholders'),
+            apiRequest('/reports/agents-list'),
+            apiRequest('/reports/game-types')
+        ]);
+        (shareholderRes.data || []).forEach(s => {
+            shareholderOptions += `<option value="${s.agent_id}">${escapeHtml(s.agent_username)}</option>`;
+        });
+        (agentRes.data || []).forEach(a => {
+            agentOptions += `<option value="${a.agent_id}">${escapeHtml(a.agent_username)}</option>`;
+        });
+        (gameTypeRes.data || []).forEach(g => {
+            gameTypeOptions += `<option value="${g.game_type}">${escapeHtml(g.game_type)}</option>`;
+        });
+    } catch (e) { console.error('加载筛选选项失败:', e); }
+    
+    content.innerHTML = `
+        <div class="card">
+            <div class="card-header bg-gradient-to-r from-blue-500 to-indigo-600 text-white">
+                <h3 class="text-lg font-semibold"><i class="fas fa-list-alt mr-2"></i>注单明细查询</h3>
+            </div>
+            <!-- 完整筛选条件 -->
+            <div class="p-4 bg-gray-50 border-b">
+                <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-3">
+                    <div>
+                        <label class="block text-xs text-gray-600 mb-1">注单号</label>
+                        <input type="text" id="BetDetailsBetNo" placeholder="输入注单号" class="form-input w-full text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-600 mb-1">会员账号</label>
+                        <input type="text" id="BetDetailsUsername" placeholder="输入会员账号" class="form-input w-full text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-600 mb-1">股东</label>
+                        <select id="BetDetailsShareholder" class="form-input w-full text-sm" onchange="loadAgentsByShareholder('BetDetails')">${shareholderOptions}</select>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-600 mb-1">代理</label>
+                        <select id="BetDetailsAgent" class="form-input w-full text-sm">${agentOptions}</select>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-600 mb-1">开始日期</label>
+                        <input type="date" id="BetDetailsStartDate" value="${startDate}" class="form-input w-full text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-600 mb-1">结束日期</label>
+                        <input type="date" id="BetDetailsEndDate" value="${endDate}" class="form-input w-full text-sm">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                    <div>
+                        <label class="block text-xs text-gray-600 mb-1">游戏类型</label>
+                        <select id="BetDetailsGameType" class="form-input w-full text-sm">${gameTypeOptions}</select>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-600 mb-1">桌台号</label>
+                        <input type="text" id="BetDetailsTableCode" placeholder="输入桌台号" class="form-input w-full text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-600 mb-1">下注区域</label>
+                        <input type="text" id="BetDetailsBetArea" placeholder="如:庄/闲/和" class="form-input w-full text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-600 mb-1">最小金额</label>
+                        <input type="number" id="BetDetailsMinAmount" placeholder="最小" class="form-input w-full text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-600 mb-1">最大金额</label>
+                        <input type="number" id="BetDetailsMaxAmount" placeholder="最大" class="form-input w-full text-sm">
+                    </div>
+                    <div class="flex items-end gap-2">
+                        <button onclick="queryBetDetails(1)" class="btn btn-primary text-sm flex-1"><i class="fas fa-search mr-1"></i>查询</button>
+                        <button onclick="exportBetDetails()" class="btn bg-green-500 text-white text-sm hover:bg-green-600"><i class="fas fa-download"></i></button>
+                    </div>
+                </div>
+            </div>
+            <div class="p-4" id="betDetailsContent">
+                <div class="text-center text-gray-500 py-10"><i class="fas fa-spinner fa-spin mr-2"></i>加载中...</div>
+            </div>
+        </div>
+    `;
+    
+    await queryBetDetails(1);
+}
+
+let betDetailsCurrentPage = 1;
+async function queryBetDetails(page = 1) {
+    betDetailsCurrentPage = page;
+    const container = document.getElementById('betDetailsContent');
+    
+    // 获取筛选条件
+    const params = new URLSearchParams();
+    params.append('page', page);
+    params.append('pageSize', '50');
+    
+    const betNo = document.getElementById('BetDetailsBetNo')?.value;
+    const username = document.getElementById('BetDetailsUsername')?.value;
+    const shareholderId = document.getElementById('BetDetailsShareholder')?.value;
+    const agentId = document.getElementById('BetDetailsAgent')?.value;
+    const startDate = document.getElementById('BetDetailsStartDate')?.value || getDefaultDateRange().startDate;
+    const endDate = document.getElementById('BetDetailsEndDate')?.value || getDefaultDateRange().endDate;
+    const gameType = document.getElementById('BetDetailsGameType')?.value;
+    const tableCode = document.getElementById('BetDetailsTableCode')?.value;
+    const betArea = document.getElementById('BetDetailsBetArea')?.value;
+    const minAmount = document.getElementById('BetDetailsMinAmount')?.value;
+    const maxAmount = document.getElementById('BetDetailsMaxAmount')?.value;
+    
+    params.append('start_date', startDate);
+    params.append('end_date', endDate);
+    if (betNo) params.append('bet_id', betNo);
+    if (username) params.append('username', username);
+    if (shareholderId) params.append('shareholder_id', shareholderId);
+    if (agentId) params.append('agent_id', agentId);
+    if (gameType) params.append('game_type', gameType);
+    if (tableCode) params.append('table_id', tableCode);
+    if (betArea) params.append('bet_area', betArea);
+    if (minAmount) params.append('min_amount', minAmount);
+    if (maxAmount) params.append('max_amount', maxAmount);
+    
+    try {
+        const res = await apiRequest(`/reports/bet-details?${params.toString()}`);
+        const { list, total, summary } = res.data || {};
+        currentReportData.betDetails = { list, total, summary };
+        
+        const totalPages = Math.ceil((total || 0) / 50);
+        
+        container.innerHTML = `
+            <!-- 汇总统计 -->
+            <div class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
+                <div class="bg-blue-50 rounded-lg p-3 text-center border border-blue-100">
+                    <div class="text-xs text-gray-600">总注单数</div>
+                    <div class="text-lg font-bold text-blue-600">${formatNumber(summary?.total_bets || 0)}</div>
+                </div>
+                <div class="bg-indigo-50 rounded-lg p-3 text-center border border-indigo-100">
+                    <div class="text-xs text-gray-600">投注人数</div>
+                    <div class="text-lg font-bold text-indigo-600">${formatNumber(summary?.player_count || 0)}</div>
+                </div>
+                <div class="bg-purple-50 rounded-lg p-3 text-center border border-purple-100">
+                    <div class="text-xs text-gray-600">总下注金额</div>
+                    <div class="text-lg font-bold text-purple-600">${formatMoney(summary?.total_bet || 0)}</div>
+                </div>
+                <div class="bg-cyan-50 rounded-lg p-3 text-center border border-cyan-100">
+                    <div class="text-xs text-gray-600">有效投注</div>
+                    <div class="text-lg font-bold text-cyan-600">${formatMoney(summary?.valid_bet || 0)}</div>
+                </div>
+                <div class="bg-${parseFloat(summary?.player_win_loss || 0) >= 0 ? 'green' : 'red'}-50 rounded-lg p-3 text-center border">
+                    <div class="text-xs text-gray-600">会员输赢</div>
+                    <div class="text-lg font-bold text-${parseFloat(summary?.player_win_loss || 0) >= 0 ? 'green' : 'red'}-600">${formatMoney(summary?.player_win_loss || 0)}</div>
+                </div>
+                <div class="bg-${parseFloat(summary?.company_profit || 0) >= 0 ? 'green' : 'red'}-50 rounded-lg p-3 text-center border">
+                    <div class="text-xs text-gray-600">公司盈利</div>
+                    <div class="text-lg font-bold text-${parseFloat(summary?.company_profit || 0) >= 0 ? 'green' : 'red'}-600">${formatMoney(summary?.company_profit || 0)}</div>
+                </div>
+            </div>
+            
+            <!-- 注单列表 -->
+            <div class="overflow-x-auto">
+                <table class="data-table text-sm">
+                    <thead class="bg-gray-100">
+                        <tr>
+                            <th>注单号</th>
+                            <th>会员账号</th>
+                            <th>所属代理</th>
+                            <th>游戏类型</th>
+                            <th>桌台</th>
+                            <th>下注区域</th>
+                            <th>下注金额</th>
+                            <th>有效投注</th>
+                            <th>输赢金额</th>
+                            <th>下注时间</th>
+                            <th>结算时间</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${(!list || list.length === 0) ? '<tr><td colspan="11" class="text-center text-gray-500 py-4">暂无数据</td></tr>' : 
+                        list.map(b => `
+                            <tr class="hover:bg-gray-50">
+                                <td class="font-mono text-xs">${escapeHtml(b.bet_no || b.bet_id || '-')}</td>
+                                <td>
+                                    <div class="font-medium">${escapeHtml(b.username || '-')}</div>
+                                    <div class="text-xs text-gray-500">VIP${b.vip_level || 0}</div>
+                                </td>
+                                <td>
+                                    <div>${escapeHtml(b.agent_username || '-')}</div>
+                                    ${b.shareholder_name ? `<div class="text-xs text-gray-500">${escapeHtml(b.shareholder_name)}</div>` : ''}
+                                </td>
+                                <td><span class="badge badge-info">${escapeHtml(b.game_type || '-')}</span></td>
+                                <td>${escapeHtml(b.table_id || '-')}</td>
+                                <td><span class="badge badge-purple">${escapeHtml(b.bet_area || '-')}</span></td>
+                                <td class="font-medium">${formatMoney(b.bet_amount || 0)}</td>
+                                <td>${formatMoney(b.valid_bet_amount || 0)}</td>
+                                <td class="${parseFloat(b.win_loss_amount || 0) >= 0 ? 'text-green-600' : 'text-red-600'} font-medium">${formatMoney(b.win_loss_amount || 0)}</td>
+                                <td class="text-xs">${b.created_at || '-'}</td>
+                                <td class="text-xs">${b.settled_at || '-'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- 分页 -->
+            ${total > 50 ? `
+            <div class="flex items-center justify-between mt-4 pt-4 border-t">
+                <div class="text-sm text-gray-600">
+                    共 ${formatNumber(total)} 条记录，第 ${page}/${totalPages} 页
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="queryBetDetails(1)" class="btn btn-sm ${page === 1 ? 'btn-disabled' : 'btn-outline'}" ${page === 1 ? 'disabled' : ''}>首页</button>
+                    <button onclick="queryBetDetails(${page - 1})" class="btn btn-sm ${page === 1 ? 'btn-disabled' : 'btn-outline'}" ${page === 1 ? 'disabled' : ''}>上一页</button>
+                    <button onclick="queryBetDetails(${page + 1})" class="btn btn-sm ${page >= totalPages ? 'btn-disabled' : 'btn-outline'}" ${page >= totalPages ? 'disabled' : ''}>下一页</button>
+                    <button onclick="queryBetDetails(${totalPages})" class="btn btn-sm ${page >= totalPages ? 'btn-disabled' : 'btn-outline'}" ${page >= totalPages ? 'disabled' : ''}>末页</button>
+                </div>
+            </div>
+            ` : ''}
+        `;
+    } catch (error) {
+        container.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+function exportBetDetails() {
+    const data = currentReportData.betDetails?.list || [];
+    if (data.length === 0) {
+        alert('暂无数据可导出');
+        return;
+    }
+    exportToExcel(data, [
+        { key: 'bet_no', label: '注单号' },
+        { key: 'username', label: '会员账号' },
+        { key: 'vip_level', label: 'VIP等级' },
+        { key: 'agent_username', label: '所属代理' },
+        { key: 'shareholder_name', label: '所属股东' },
+        { key: 'game_type', label: '游戏类型' },
+        { key: 'table_id', label: '桌台号' },
+        { key: 'bet_area', label: '下注区域' },
+        { key: 'bet_amount', label: '下注金额' },
+        { key: 'valid_bet_amount', label: '有效投注' },
+        { key: 'win_loss_amount', label: '输赢金额' },
+        { key: 'created_at', label: '下注时间' },
+        { key: 'settled_at', label: '结算时间' }
+    ], '注单明细');
+}
+
+// ==================== 盈利分成报表 ====================
+async function renderProfitSharing() {
+    const content = document.getElementById('pageContent');
+    const { startDate, endDate } = getDefaultDateRange();
+    
+    // 加载股东下拉选项
+    let shareholderOptions = '<option value="">全部股东</option>';
+    try {
+        const shareholderRes = await apiRequest('/reports/shareholders');
+        (shareholderRes.data || []).forEach(s => {
+            shareholderOptions += `<option value="${s.agent_id}">${escapeHtml(s.agent_username)}</option>`;
+        });
+    } catch (e) { console.error('加载股东列表失败:', e); }
+    
+    content.innerHTML = `
+        <div class="card">
+            <div class="card-header bg-gradient-to-r from-green-500 to-teal-600 text-white">
+                <h3 class="text-lg font-semibold"><i class="fas fa-hand-holding-usd mr-2"></i>盈利分成报表 - 对账与结算</h3>
+            </div>
+            <!-- 筛选条件 -->
+            <div class="p-4 bg-gray-50 border-b">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div>
+                        <label class="block text-xs text-gray-600 mb-1">开始日期</label>
+                        <input type="date" id="ProfitStartDate" value="${startDate}" class="form-input w-full text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-600 mb-1">结束日期</label>
+                        <input type="date" id="ProfitEndDate" value="${endDate}" class="form-input w-full text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-600 mb-1">股东</label>
+                        <select id="ProfitShareholder" class="form-input w-full text-sm">${shareholderOptions}</select>
+                    </div>
+                    <div class="flex items-end gap-2">
+                        <button onclick="queryProfitSharing()" class="btn btn-primary text-sm flex-1"><i class="fas fa-search mr-1"></i>查询</button>
+                        <button onclick="exportProfitSharing()" class="btn bg-green-500 text-white text-sm hover:bg-green-600"><i class="fas fa-download"></i></button>
+                    </div>
+                </div>
+            </div>
+            <div class="p-4" id="profitSharingContent">
+                <div class="text-center text-gray-500 py-10"><i class="fas fa-spinner fa-spin mr-2"></i>加载中...</div>
+            </div>
+        </div>
+    `;
+    
+    await queryProfitSharing();
+}
+
+async function queryProfitSharing() {
+    const startDate = document.getElementById('ProfitStartDate')?.value || getDefaultDateRange().startDate;
+    const endDate = document.getElementById('ProfitEndDate')?.value || getDefaultDateRange().endDate;
+    const shareholderId = document.getElementById('ProfitShareholder')?.value || '';
+    const container = document.getElementById('profitSharingContent');
+    
+    try {
+        const res = await apiRequest(`/reports/profit-sharing?start_date=${startDate}&end_date=${endDate}${shareholderId ? '&shareholder_id=' + shareholderId : ''}`);
+        const data = res.data || {};
+        currentReportData.profitSharing = data;
+        
+        const summary = data.summary || {};
+        const shareholders = data.shareholders || [];
+        const agents = data.agents || [];
+        
+        container.innerHTML = `
+            <!-- 总体盈亏汇总 -->
+            <div class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 mb-6 border border-blue-100">
+                <h4 class="text-sm font-semibold text-gray-700 mb-3"><i class="fas fa-chart-pie mr-1"></i>总体盈亏汇总</h4>
+                <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                    <div class="bg-white rounded-lg p-3 text-center shadow-sm">
+                        <div class="text-xs text-gray-500">总投注额</div>
+                        <div class="text-lg font-bold text-blue-600">${formatMoney(summary.total_bet || 0)}</div>
+                    </div>
+                    <div class="bg-white rounded-lg p-3 text-center shadow-sm">
+                        <div class="text-xs text-gray-500">有效投注</div>
+                        <div class="text-lg font-bold text-indigo-600">${formatMoney(summary.valid_bet || 0)}</div>
+                    </div>
+                    <div class="bg-white rounded-lg p-3 text-center shadow-sm">
+                        <div class="text-xs text-gray-500">会员输赢</div>
+                        <div class="text-lg font-bold ${parseFloat(summary.player_win_loss || 0) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(summary.player_win_loss || 0)}</div>
+                    </div>
+                    <div class="bg-white rounded-lg p-3 text-center shadow-sm">
+                        <div class="text-xs text-gray-500">毛利润</div>
+                        <div class="text-lg font-bold ${parseFloat(summary.gross_profit || 0) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(summary.gross_profit || 0)}</div>
+                    </div>
+                    <div class="bg-white rounded-lg p-3 text-center shadow-sm border-2 border-orange-200">
+                        <div class="text-xs text-gray-500">股东应得</div>
+                        <div class="text-lg font-bold text-orange-600">${formatMoney(summary.shareholder_share || 0)}</div>
+                    </div>
+                    <div class="bg-white rounded-lg p-3 text-center shadow-sm border-2 border-purple-200">
+                        <div class="text-xs text-gray-500">代理佣金</div>
+                        <div class="text-lg font-bold text-purple-600">${formatMoney(summary.agent_commission || 0)}</div>
+                    </div>
+                    <div class="bg-white rounded-lg p-3 text-center shadow-sm border-2 border-teal-200">
+                        <div class="text-xs text-gray-500">公司净利</div>
+                        <div class="text-lg font-bold text-teal-600">${formatMoney(summary.company_net_profit || 0)}</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 股东盈利分成明细 -->
+            <div class="mb-6">
+                <div class="flex items-center justify-between mb-3">
+                    <h4 class="text-sm font-semibold text-gray-700"><i class="fas fa-user-tie mr-1"></i>股东盈利分成明细</h4>
+                    <button onclick="exportShareholderProfit()" class="btn btn-sm bg-orange-500 text-white hover:bg-orange-600"><i class="fas fa-download mr-1"></i>导出股东报表</button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="data-table text-sm">
+                        <thead class="bg-orange-50">
+                            <tr>
+                                <th>股东账号</th>
+                                <th>占成比例</th>
+                                <th>下级代理数</th>
+                                <th>玩家数</th>
+                                <th>总投注</th>
+                                <th>有效投注</th>
+                                <th>会员输赢</th>
+                                <th>毛利润</th>
+                                <th class="bg-orange-100">应得金额</th>
+                                <th>平台收益</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${shareholders.length === 0 ? '<tr><td colspan="10" class="text-center text-gray-500 py-4">暂无数据</td></tr>' : 
+                            shareholders.map(s => `
+                                <tr>
+                                    <td class="font-medium">${escapeHtml(s.shareholder_name || s.agent_username || '-')}</td>
+                                    <td><span class="badge badge-orange">${s.share_ratio || 0}%</span></td>
+                                    <td>${formatNumber(s.sub_agent_count || 0)}</td>
+                                    <td>${formatNumber(s.player_count || 0)}</td>
+                                    <td>${formatMoney(s.total_bet || 0)}</td>
+                                    <td>${formatMoney(s.valid_bet || 0)}</td>
+                                    <td class="${parseFloat(s.player_win_loss || 0) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(s.player_win_loss || 0)}</td>
+                                    <td class="${parseFloat(s.gross_profit || 0) >= 0 ? 'text-green-600' : 'text-red-600'} font-medium">${formatMoney(s.gross_profit || 0)}</td>
+                                    <td class="bg-orange-50 text-orange-600 font-bold">${formatMoney(s.shareholder_profit || 0)}</td>
+                                    <td class="text-teal-600 font-medium">${formatMoney(s.platform_profit || 0)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                        ${shareholders.length > 0 ? `
+                        <tfoot class="bg-gray-100 font-bold">
+                            <tr>
+                                <td colspan="4">合计</td>
+                                <td>${formatMoney(shareholders.reduce((s,r) => s + parseFloat(r.total_bet || 0), 0))}</td>
+                                <td>${formatMoney(shareholders.reduce((s,r) => s + parseFloat(r.valid_bet || 0), 0))}</td>
+                                <td class="${shareholders.reduce((s,r) => s + parseFloat(r.player_win_loss || 0), 0) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(shareholders.reduce((s,r) => s + parseFloat(r.player_win_loss || 0), 0))}</td>
+                                <td class="${shareholders.reduce((s,r) => s + parseFloat(r.gross_profit || 0), 0) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(shareholders.reduce((s,r) => s + parseFloat(r.gross_profit || 0), 0))}</td>
+                                <td class="text-orange-600">${formatMoney(shareholders.reduce((s,r) => s + parseFloat(r.shareholder_profit || 0), 0))}</td>
+                                <td class="text-teal-600">${formatMoney(shareholders.reduce((s,r) => s + parseFloat(r.platform_profit || 0), 0))}</td>
+                            </tr>
+                        </tfoot>
+                        ` : ''}
+                    </table>
+                </div>
+            </div>
+            
+            <!-- 代理佣金明细 -->
+            <div>
+                <div class="flex items-center justify-between mb-3">
+                    <h4 class="text-sm font-semibold text-gray-700"><i class="fas fa-users mr-1"></i>代理佣金明细</h4>
+                    <button onclick="exportAgentCommission()" class="btn btn-sm bg-purple-500 text-white hover:bg-purple-600"><i class="fas fa-download mr-1"></i>导出代理报表</button>
+                </div>
+                <div class="overflow-x-auto max-h-[400px]">
+                    <table class="data-table text-sm">
+                        <thead class="bg-purple-50 sticky top-0">
+                            <tr>
+                                <th>代理账号</th>
+                                <th>所属股东</th>
+                                <th>层级</th>
+                                <th>佣金比例</th>
+                                <th>玩家数</th>
+                                <th>总投注</th>
+                                <th>有效投注</th>
+                                <th>会员输赢</th>
+                                <th>毛利润</th>
+                                <th class="bg-purple-100">应得佣金</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${agents.length === 0 ? '<tr><td colspan="10" class="text-center text-gray-500 py-4">暂无数据</td></tr>' : 
+                            agents.map(a => `
+                                <tr>
+                                    <td class="font-medium">${escapeHtml(a.agent_username || '-')}</td>
+                                    <td>${escapeHtml(a.shareholder_name || '-')}</td>
+                                    <td>${getLevelBadge(a.level)}</td>
+                                    <td><span class="badge badge-purple">${a.commission_ratio || 0}%</span></td>
+                                    <td>${formatNumber(a.player_count || 0)}</td>
+                                    <td>${formatMoney(a.total_bet || 0)}</td>
+                                    <td>${formatMoney(a.valid_bet || 0)}</td>
+                                    <td class="${parseFloat(a.player_win_loss || 0) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(a.player_win_loss || 0)}</td>
+                                    <td class="${parseFloat(a.gross_profit || 0) >= 0 ? 'text-green-600' : 'text-red-600'} font-medium">${formatMoney(a.gross_profit || 0)}</td>
+                                    <td class="bg-purple-50 text-purple-600 font-bold">${formatMoney(a.commission_earned || 0)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                        ${agents.length > 0 ? `
+                        <tfoot class="bg-gray-100 font-bold">
+                            <tr>
+                                <td colspan="5">合计</td>
+                                <td>${formatMoney(agents.reduce((s,r) => s + parseFloat(r.total_bet || 0), 0))}</td>
+                                <td>${formatMoney(agents.reduce((s,r) => s + parseFloat(r.valid_bet || 0), 0))}</td>
+                                <td class="${agents.reduce((s,r) => s + parseFloat(r.player_win_loss || 0), 0) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(agents.reduce((s,r) => s + parseFloat(r.player_win_loss || 0), 0))}</td>
+                                <td class="${agents.reduce((s,r) => s + parseFloat(r.gross_profit || 0), 0) >= 0 ? 'text-green-600' : 'text-red-600'}">${formatMoney(agents.reduce((s,r) => s + parseFloat(r.gross_profit || 0), 0))}</td>
+                                <td class="text-purple-600">${formatMoney(agents.reduce((s,r) => s + parseFloat(r.commission_earned || 0), 0))}</td>
+                            </tr>
+                        </tfoot>
+                        ` : ''}
+                    </table>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        container.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+function exportProfitSharing() {
+    const data = currentReportData.profitSharing || {};
+    const shareholders = data.shareholders || [];
+    const agents = data.agents || [];
+    
+    // 合并导出股东和代理数据
+    const exportData = [
+        { type: '=== 股东盈利分成 ===' },
+        ...shareholders.map(s => ({
+            type: '股东',
+            name: s.shareholder_name || s.agent_username,
+            share_ratio: (s.share_ratio || 0) + '%',
+            player_count: s.player_count,
+            total_bet: s.total_bet,
+            valid_bet: s.valid_bet,
+            player_win_loss: s.player_win_loss,
+            gross_profit: s.gross_profit,
+            earned: s.shareholder_profit,
+            platform: s.platform_profit
+        })),
+        { type: '=== 代理佣金明细 ===' },
+        ...agents.map(a => ({
+            type: '代理',
+            name: a.agent_username,
+            share_ratio: (a.commission_ratio || 0) + '%',
+            player_count: a.player_count,
+            total_bet: a.total_bet,
+            valid_bet: a.valid_bet,
+            player_win_loss: a.player_win_loss,
+            gross_profit: a.gross_profit,
+            earned: a.commission_earned,
+            platform: ''
+        }))
+    ];
+    
+    exportToExcel(exportData, [
+        { key: 'type', label: '类型' },
+        { key: 'name', label: '账号' },
+        { key: 'share_ratio', label: '分成/佣金比例' },
+        { key: 'player_count', label: '玩家数' },
+        { key: 'total_bet', label: '总投注' },
+        { key: 'valid_bet', label: '有效投注' },
+        { key: 'player_win_loss', label: '会员输赢' },
+        { key: 'gross_profit', label: '毛利润' },
+        { key: 'earned', label: '应得金额' },
+        { key: 'platform', label: '平台收益' }
+    ], '盈利分成报表');
+}
+
+function exportShareholderProfit() {
+    const shareholders = currentReportData.profitSharing?.shareholders || [];
+    exportToExcel(shareholders, [
+        { key: 'shareholder_name', label: '股东账号' },
+        { key: 'share_ratio', label: '占成比例(%)' },
+        { key: 'sub_agent_count', label: '下级代理数' },
+        { key: 'player_count', label: '玩家数' },
+        { key: 'total_bet', label: '总投注' },
+        { key: 'valid_bet', label: '有效投注' },
+        { key: 'player_win_loss', label: '会员输赢' },
+        { key: 'gross_profit', label: '毛利润' },
+        { key: 'shareholder_profit', label: '应得金额' },
+        { key: 'platform_profit', label: '平台收益' }
+    ], '股东盈利分成');
+}
+
+function exportAgentCommission() {
+    const agents = currentReportData.profitSharing?.agents || [];
+    exportToExcel(agents, [
+        { key: 'agent_username', label: '代理账号' },
+        { key: 'shareholder_name', label: '所属股东' },
+        { key: 'level', label: '层级' },
+        { key: 'commission_ratio', label: '佣金比例(%)' },
+        { key: 'player_count', label: '玩家数' },
+        { key: 'total_bet', label: '总投注' },
+        { key: 'valid_bet', label: '有效投注' },
+        { key: 'player_win_loss', label: '会员输赢' },
+        { key: 'gross_profit', label: '毛利润' },
+        { key: 'commission_earned', label: '应得佣金' }
+    ], '代理佣金明细');
 }
 
 // 代理业绩

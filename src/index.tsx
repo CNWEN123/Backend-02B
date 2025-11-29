@@ -4046,6 +4046,108 @@ app.get('/api/v1/reports/game-types', async (c) => {
   }
 })
 
+// 盈利分成报表 - 用于对账与结算
+app.get('/api/v1/reports/profit-sharing', async (c) => {
+  const start_date = c.req.query('start_date') || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  const end_date = c.req.query('end_date') || new Date().toISOString().split('T')[0]
+  const shareholder_id = c.req.query('shareholder_id')
+
+  try {
+    // 构建时间范围条件
+    let shareholderWhere = shareholder_id ? ' AND sh.agent_id = ?' : ''
+    const shareholderParams: any[] = shareholder_id ? [start_date, end_date, parseInt(shareholder_id)] : [start_date, end_date]
+
+    // 获取股东盈利分成明细
+    const shareholderResult = await c.env.DB.prepare(`
+      SELECT 
+        sh.agent_id as shareholder_id,
+        sh.agent_username as shareholder_name,
+        sh.nickname,
+        sh.share_ratio,
+        COUNT(DISTINCT a.agent_id) as sub_agent_count,
+        COUNT(DISTINCT b.user_id) as player_count,
+        COUNT(b.bet_id) as bet_count,
+        COALESCE(SUM(b.bet_amount), 0) as total_bet,
+        COALESCE(SUM(b.valid_bet_amount), 0) as valid_bet,
+        COALESCE(SUM(b.win_loss_amount), 0) as player_win_loss,
+        -COALESCE(SUM(b.win_loss_amount), 0) as gross_profit,
+        ROUND(-COALESCE(SUM(b.win_loss_amount), 0) * sh.share_ratio / 100, 2) as shareholder_profit,
+        ROUND(-COALESCE(SUM(b.win_loss_amount), 0) * (100 - sh.share_ratio) / 100, 2) as platform_profit
+      FROM agents sh
+      LEFT JOIN agents a ON a.parent_agent_id = sh.agent_id
+      LEFT JOIN users u ON u.agent_id = a.agent_id OR u.agent_id = sh.agent_id
+      LEFT JOIN bets b ON b.user_id = u.user_id AND DATE(b.created_at) BETWEEN ? AND ? AND b.bet_status = 1
+      WHERE sh.level = 1${shareholderWhere}
+      GROUP BY sh.agent_id
+      ORDER BY gross_profit DESC
+    `).bind(...shareholderParams).all()
+
+    // 获取代理佣金明细
+    let agentWhere = ''
+    const agentParams: any[] = [start_date, end_date]
+    if (shareholder_id) {
+      agentWhere = ' AND (a.parent_agent_id = ? OR a.agent_id = ?)'
+      agentParams.push(parseInt(shareholder_id), parseInt(shareholder_id))
+    }
+
+    const agentResult = await c.env.DB.prepare(`
+      SELECT 
+        a.agent_id,
+        a.agent_username,
+        a.nickname as agent_nickname,
+        a.level,
+        a.commission_ratio,
+        a.share_ratio,
+        sh.agent_username as shareholder_name,
+        sh.agent_id as shareholder_id,
+        COUNT(DISTINCT b.user_id) as player_count,
+        COUNT(b.bet_id) as bet_count,
+        COALESCE(SUM(b.bet_amount), 0) as total_bet,
+        COALESCE(SUM(b.valid_bet_amount), 0) as valid_bet,
+        COALESCE(SUM(b.win_loss_amount), 0) as player_win_loss,
+        -COALESCE(SUM(b.win_loss_amount), 0) as gross_profit,
+        ROUND(COALESCE(SUM(b.valid_bet_amount), 0) * a.commission_ratio / 100, 2) as commission_earned
+      FROM agents a
+      LEFT JOIN agents sh ON a.parent_agent_id = sh.agent_id AND sh.level = 1
+      LEFT JOIN users u ON u.agent_id = a.agent_id
+      LEFT JOIN bets b ON b.user_id = u.user_id AND DATE(b.created_at) BETWEEN ? AND ? AND b.bet_status = 1
+      WHERE 1=1${agentWhere}
+      GROUP BY a.agent_id
+      HAVING bet_count > 0 OR player_count > 0
+      ORDER BY gross_profit DESC
+      LIMIT 200
+    `).bind(...agentParams).all()
+
+    // 计算总体汇总
+    const shareholders = shareholderResult.results || []
+    const agents = agentResult.results || []
+
+    const summary = {
+      total_bet: shareholders.reduce((s: number, r: any) => s + parseFloat(r.total_bet || 0), 0),
+      valid_bet: shareholders.reduce((s: number, r: any) => s + parseFloat(r.valid_bet || 0), 0),
+      player_win_loss: shareholders.reduce((s: number, r: any) => s + parseFloat(r.player_win_loss || 0), 0),
+      gross_profit: shareholders.reduce((s: number, r: any) => s + parseFloat(r.gross_profit || 0), 0),
+      shareholder_share: shareholders.reduce((s: number, r: any) => s + parseFloat(r.shareholder_profit || 0), 0),
+      agent_commission: agents.reduce((s: number, r: any) => s + parseFloat(r.commission_earned || 0), 0),
+      company_net_profit: 0
+    }
+    // 公司净利 = 毛利润 - 股东应得 - 代理佣金
+    summary.company_net_profit = summary.gross_profit - summary.shareholder_share - summary.agent_commission
+
+    return c.json({
+      success: true,
+      data: {
+        summary,
+        shareholders,
+        agents
+      }
+    })
+  } catch (error) {
+    console.error('获取盈利分成报表失败:', error)
+    return c.json({ success: false, message: '获取盈利分成报表失败' }, 500)
+  }
+})
+
 // ==================== 收款方式管理API ====================
 
 // 获取收款方式列表
