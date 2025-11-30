@@ -36,6 +36,307 @@ function safeJsonDisplay(obj) {
     }
 }
 
+// ==================== 查询增强工具函数 ====================
+
+// 日期工具函数
+const DateUtils = {
+    // 获取今天
+    getToday() {
+        return new Date().toISOString().split('T')[0];
+    },
+    
+    // 获取昨天
+    getYesterday() {
+        const date = new Date();
+        date.setDate(date.getDate() - 1);
+        return date.toISOString().split('T')[0];
+    },
+    
+    // 获取本周开始日期
+    getWeekStart() {
+        const date = new Date();
+        const day = date.getDay();
+        const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+        date.setDate(diff);
+        return date.toISOString().split('T')[0];
+    },
+    
+    // 获取本月开始日期
+    getMonthStart() {
+        const date = new Date();
+        date.setDate(1);
+        return date.toISOString().split('T')[0];
+    },
+    
+    // 获取上月开始和结束日期
+    getLastMonth() {
+        const date = new Date();
+        date.setMonth(date.getMonth() - 1);
+        const start = new Date(date.getFullYear(), date.getMonth(), 1);
+        const end = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+        return {
+            start: start.toISOString().split('T')[0],
+            end: end.toISOString().split('T')[0]
+        };
+    },
+    
+    // 获取最近N天的日期范围
+    getRecentDays(days) {
+        const end = new Date();
+        const start = new Date();
+        start.setDate(start.getDate() - days + 1);
+        return {
+            start: start.toISOString().split('T')[0],
+            end: end.toISOString().split('T')[0]
+        };
+    }
+};
+
+// 查询参数缓存
+const QueryCache = {
+    // 保存查询参数
+    save(page, params) {
+        try {
+            localStorage.setItem(`query_${page}`, JSON.stringify(params));
+        } catch (e) {
+            console.warn('无法保存查询参数:', e);
+        }
+    },
+    
+    // 恢复查询参数
+    restore(page) {
+        try {
+            const saved = localStorage.getItem(`query_${page}`);
+            return saved ? JSON.parse(saved) : {};
+        } catch (e) {
+            console.warn('无法恢复查询参数:', e);
+            return {};
+        }
+    },
+    
+    // 清除查询参数
+    clear(page) {
+        try {
+            localStorage.removeItem(`query_${page}`);
+        } catch (e) {
+            console.warn('无法清除查询参数:', e);
+        }
+    }
+};
+
+// 生成通用查询表单HTML
+function generateSearchForm(config) {
+    const {
+        page,
+        fields = [],
+        advanced = [],
+        quickDates = true,
+        showExport = true
+    } = config;
+    
+    // 恢复上次查询参数
+    const savedParams = QueryCache.restore(page);
+    
+    let html = `
+        <div class="bg-gray-50 p-4 rounded-lg mb-4" id="searchForm_${page}">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+    `;
+    
+    // 基础查询字段
+    fields.forEach(field => {
+        const savedValue = savedParams[field.name] || '';
+        
+        if (field.type === 'text' || field.type === 'number') {
+            html += `
+                <input 
+                    type="${field.type}" 
+                    id="search_${field.name}" 
+                    name="${field.name}"
+                    placeholder="${field.placeholder || field.label}" 
+                    value="${escapeAttr(savedValue)}"
+                    class="form-input px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+            `;
+        } else if (field.type === 'select') {
+            html += `
+                <select 
+                    id="search_${field.name}" 
+                    name="${field.name}"
+                    class="form-input px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+                    <option value="">${field.placeholder || field.label}</option>
+                    ${field.options.map(opt => `
+                        <option value="${escapeAttr(opt.value)}" ${savedValue === opt.value ? 'selected' : ''}>
+                            ${escapeHtml(opt.label)}
+                        </option>
+                    `).join('')}
+                </select>
+            `;
+        } else if (field.type === 'date') {
+            html += `
+                <input 
+                    type="date" 
+                    id="search_${field.name}" 
+                    name="${field.name}"
+                    value="${escapeAttr(savedValue)}"
+                    class="form-input px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+            `;
+        }
+    });
+    
+    html += `
+            </div>
+            
+            <!-- 操作按钮行 -->
+            <div class="flex flex-wrap items-center gap-2 mt-3">
+    `;
+    
+    // 快捷日期选择
+    if (quickDates) {
+        html += `
+                <div class="flex items-center gap-1 mr-4">
+                    <span class="text-xs text-gray-600 mr-1">快速:</span>
+                    <button type="button" onclick="setQuickDate_${page}('today')" 
+                            class="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 transition">今天</button>
+                    <button type="button" onclick="setQuickDate_${page}('yesterday')" 
+                            class="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 transition">昨天</button>
+                    <button type="button" onclick="setQuickDate_${page}('week')" 
+                            class="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 transition">本周</button>
+                    <button type="button" onclick="setQuickDate_${page}('month')" 
+                            class="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 transition">本月</button>
+                    <button type="button" onclick="setQuickDate_${page}('last7')" 
+                            class="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 transition">近7天</button>
+                    <button type="button" onclick="setQuickDate_${page}('last30')" 
+                            class="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 transition">近30天</button>
+                </div>
+        `;
+    }
+    
+    // 高级筛选按钮
+    if (advanced && advanced.length > 0) {
+        html += `
+                <button type="button" onclick="toggleAdvanced_${page}()" 
+                        class="btn btn-secondary text-sm">
+                    <i class="fas fa-filter mr-1"></i>高级筛选
+                </button>
+        `;
+    }
+    
+    // 查询和重置按钮
+    html += `
+                <div class="flex gap-2 ml-auto">
+                    <button type="button" onclick="doSearch_${page}()" 
+                            class="btn btn-primary text-sm">
+                        <i class="fas fa-search mr-1"></i>查询
+                    </button>
+                    <button type="button" onclick="resetSearch_${page}()" 
+                            class="btn btn-secondary text-sm">
+                        <i class="fas fa-redo mr-1"></i>重置
+                    </button>
+    `;
+    
+    // 导出按钮
+    if (showExport) {
+        html += `
+                    <button type="button" onclick="exportData_${page}()" 
+                            class="btn btn-success text-sm">
+                        <i class="fas fa-file-excel mr-1"></i>导出
+                    </button>
+        `;
+    }
+    
+    html += `
+                </div>
+            </div>
+    `;
+    
+    // 高级筛选区域
+    if (advanced && advanced.length > 0) {
+        html += `
+            <div id="advanced_${page}" class="hidden mt-3 pt-3 border-t border-gray-300">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        `;
+        
+        advanced.forEach(field => {
+            const savedValue = savedParams[field.name] || '';
+            
+            if (field.type === 'range') {
+                html += `
+                    <div class="flex items-center gap-2">
+                        <input 
+                            type="number" 
+                            id="search_${field.name}_min" 
+                            name="${field.name}_min"
+                            placeholder="${field.placeholder_min || '最小' + field.label}" 
+                            value="${escapeAttr(savedParams[field.name + '_min'] || '')}"
+                            class="form-input px-3 py-2 border border-gray-300 rounded-lg text-sm flex-1">
+                        <span class="text-gray-500">-</span>
+                        <input 
+                            type="number" 
+                            id="search_${field.name}_max" 
+                            name="${field.name}_max"
+                            placeholder="${field.placeholder_max || '最大' + field.label}" 
+                            value="${escapeAttr(savedParams[field.name + '_max'] || '')}"
+                            class="form-input px-3 py-2 border border-gray-300 rounded-lg text-sm flex-1">
+                    </div>
+                `;
+            } else if (field.type === 'select') {
+                html += `
+                    <select 
+                        id="search_${field.name}" 
+                        name="${field.name}"
+                        class="form-input px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                        <option value="">${field.placeholder || field.label}</option>
+                        ${field.options.map(opt => `
+                            <option value="${escapeAttr(opt.value)}" ${savedValue === opt.value ? 'selected' : ''}>
+                                ${escapeHtml(opt.label)}
+                            </option>
+                        `).join('')}
+                    </select>
+                `;
+            } else {
+                html += `
+                    <input 
+                        type="${field.type || 'text'}" 
+                        id="search_${field.name}" 
+                        name="${field.name}"
+                        placeholder="${field.placeholder || field.label}" 
+                        value="${escapeAttr(savedValue)}"
+                        class="form-input px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                `;
+            }
+        });
+        
+        html += `
+                </div>
+            </div>
+        `;
+    }
+    
+    html += `
+        </div>
+    `;
+    
+    return html;
+}
+
+// 从表单获取查询参数
+function getSearchParams(page) {
+    const form = document.getElementById(`searchForm_${page}`);
+    if (!form) return {};
+    
+    const params = {};
+    const inputs = form.querySelectorAll('input, select');
+    
+    inputs.forEach(input => {
+        const name = input.getAttribute('name');
+        const value = input.value.trim();
+        if (name && value) {
+            params[name] = value;
+        }
+    });
+    
+    return params;
+}
+
 // 根据股东加载代理下拉选项
 async function loadAgentsByShareholder(prefix) {
     const shareholderId = document.getElementById(prefix + 'Shareholder')?.value || '';
@@ -809,33 +1110,63 @@ async function renderPlayers() {
     const content = document.getElementById('pageContent');
     
     try {
-        const res = await apiRequest('/players');
+        // 获取查询参数
+        const params = getSearchParams('players') || {};
+        const queryString = new URLSearchParams(params).toString();
+        const url = queryString ? `/players?${queryString}` : '/players';
+        
+        const res = await apiRequest(url);
         const { list, total, page, size } = res.data;
+        
+        // 生成查询表单配置
+        const searchFormHTML = generateSearchForm({
+            page: 'players',
+            fields: [
+                { name: 'username', type: 'text', placeholder: '玩家账号/昵称' },
+                { name: 'user_id', type: 'number', placeholder: '用户ID' },
+                {
+                    name: 'status',
+                    type: 'select',
+                    placeholder: '全部状态',
+                    options: [
+                        { value: '1', label: '正常' },
+                        { value: '0', label: '冻结' },
+                        { value: '2', label: '锁定' }
+                    ]
+                },
+                {
+                    name: 'vip_level',
+                    type: 'select',
+                    placeholder: 'VIP等级',
+                    options: [
+                        { value: '0', label: 'VIP0' },
+                        { value: '1', label: 'VIP1' },
+                        { value: '2', label: 'VIP2' },
+                        { value: '3', label: 'VIP3' },
+                        { value: '4', label: 'VIP4' },
+                        { value: '5', label: 'VIP5' },
+                        { value: '6', label: 'VIP6' }
+                    ]
+                }
+            ],
+            advanced: [
+                { name: 'agent_username', type: 'text', placeholder: '所属代理' },
+                { name: 'balance', type: 'range', label: '余额', placeholder_min: '最小余额', placeholder_max: '最大余额' },
+                { name: 'register_start', type: 'date', label: '注册开始日期' },
+                { name: 'register_end', type: 'date', label: '注册结束日期' }
+            ],
+            quickDates: true,
+            showExport: true
+        });
         
         content.innerHTML = `
             <div class="card">
                 <div class="card-header flex items-center justify-between">
-                    <span>玩家列表</span>
-                    <div class="flex items-center space-x-2">
-                        <button class="btn btn-success text-sm">
-                            <i class="fas fa-file-excel mr-1"></i>导出Excel
-                        </button>
-                    </div>
+                    <span>玩家列表 <span class="badge badge-primary ml-2">${total}</span></span>
                 </div>
                 <div class="card-body">
-                    <!-- 搜索栏 -->
-                    <div class="flex flex-wrap gap-4 mb-4">
-                        <input type="text" id="searchUsername" placeholder="账号" class="px-3 py-2 border rounded-lg w-40">
-                        <select id="searchStatus" class="px-3 py-2 border rounded-lg">
-                            <option value="">全部状态</option>
-                            <option value="1">正常</option>
-                            <option value="0">冻结</option>
-                            <option value="2">锁定</option>
-                        </select>
-                        <button onclick="searchPlayers()" class="btn btn-primary">
-                            <i class="fas fa-search mr-1"></i>查询
-                        </button>
-                    </div>
+                    <!-- 查询表单 -->
+                    ${searchFormHTML}
                     
                     <!-- 数据表格 -->
                     <div class="overflow-x-auto">
@@ -1555,38 +1886,75 @@ async function renderTransactions() {
     const content = document.getElementById('pageContent');
     
     try {
-        const res = await apiRequest('/finance/transactions');
-        const { list, total } = res.data;
+        // 获取查询参数
+        const params = getSearchParams('transactions') || {};
+        const queryString = new URLSearchParams(params).toString();
+        const url = queryString ? `/finance/transactions?${queryString}` : '/finance/transactions';
+        
+        const res = await apiRequest(url);
+        const { list, total, page, size, summary } = res.data;
+        
+        // 生成查询表单配置
+        const searchFormHTML = generateSearchForm({
+            page: 'transactions',
+            fields: [
+                { name: 'start_date', type: 'date', placeholder: '开始日期' },
+                { name: 'end_date', type: 'date', placeholder: '结束日期' },
+                {
+                    name: 'type',
+                    type: 'select',
+                    placeholder: '全部类型',
+                    options: [
+                        { value: '1', label: '存款' },
+                        { value: '2', label: '取款' },
+                        { value: '3', label: '投注' },
+                        { value: '4', label: '派彩' },
+                        { value: '5', label: '红利' },
+                        { value: '6', label: '洗码' }
+                    ]
+                },
+                {
+                    name: 'status',
+                    type: 'select',
+                    placeholder: '全部状态',
+                    options: [
+                        { value: '0', label: '待审核' },
+                        { value: '1', label: '已通过' },
+                        { value: '2', label: '已拒绝' }
+                    ]
+                }
+            ],
+            advanced: [
+                { name: 'order_no', type: 'text', placeholder: '订单号' },
+                { name: 'username', type: 'text', placeholder: '会员账号' },
+                { name: 'user_id', type: 'number', placeholder: '用户ID' },
+                { name: 'amount_min', type: 'number', placeholder: '最小金额' },
+                { name: 'amount_max', type: 'number', placeholder: '最大金额' }
+            ],
+            quickDates: true,
+            showExport: true
+        });
         
         content.innerHTML = `
             <div class="card">
                 <div class="card-header flex items-center justify-between">
-                    <span>账户明细</span>
-                    <button class="btn btn-success text-sm">
-                        <i class="fas fa-file-excel mr-1"></i>导出
-                    </button>
+                    <span>账户明细 <span class="badge badge-primary ml-2">${total}</span></span>
+                    ${summary ? `
+                        <div class="flex items-center gap-4 text-sm">
+                            <span class="text-green-600">收入: ¥${formatNumber(summary.total_in || 0)}</span>
+                            <span class="text-red-600">支出: ¥${formatNumber(summary.total_out || 0)}</span>
+                        </div>
+                    ` : ''}
                 </div>
                 <div class="card-body">
-                    <!-- 筛选 -->
-                    <div class="flex flex-wrap gap-4 mb-4">
-                        <input type="date" class="px-3 py-2 border rounded-lg">
-                        <input type="date" class="px-3 py-2 border rounded-lg">
-                        <select class="px-3 py-2 border rounded-lg">
-                            <option value="">全部类型</option>
-                            <option value="1">存款</option>
-                            <option value="2">取款</option>
-                            <option value="3">投注</option>
-                            <option value="4">派彩</option>
-                            <option value="5">红利</option>
-                            <option value="6">洗码</option>
-                        </select>
-                        <button class="btn btn-primary">查询</button>
-                    </div>
+                    <!-- 查询表单 -->
+                    ${searchFormHTML}
                     
                     <div class="overflow-x-auto">
                         <table class="data-table">
                             <thead>
                                 <tr>
+                                    <th>交易ID</th>
                                     <th>类型</th>
                                     <th>订单号</th>
                                     <th>会员</th>
@@ -1598,29 +1966,90 @@ async function renderTransactions() {
                                 </tr>
                             </thead>
                             <tbody>
-                                ${list.map(tx => `
+                                ${list && list.length > 0 ? list.map(tx => `
                                     <tr>
+                                        <td>${escapeHtml(tx.transaction_id)}</td>
                                         <td>${getTransactionTypeBadge(tx.transaction_type)}</td>
-                                        <td class="font-mono text-sm">${escapeHtml(tx.order_no)}</td>
+                                        <td class="font-mono text-sm">${escapeHtml(tx.order_no || '-')}</td>
                                         <td>${escapeHtml(tx.username)}</td>
                                         <td class="${tx.amount >= 0 ? 'text-green-600' : 'text-red-600'} font-medium">
-                                            ${tx.amount >= 0 ? '+' : ''}${formatNumber(tx.amount)}
+                                            ${tx.amount >= 0 ? '+' : ''}¥${formatNumber(tx.amount)}
                                         </td>
-                                        <td>${formatNumber(tx.balance_before)}</td>
-                                        <td>${formatNumber(tx.balance_after)}</td>
+                                        <td>¥${formatNumber(tx.balance_before)}</td>
+                                        <td>¥${formatNumber(tx.balance_after)}</td>
                                         <td>${getAuditStatusBadge(tx.audit_status)}</td>
                                         <td>${formatDate(tx.created_at)}</td>
                                     </tr>
-                                `).join('')}
+                                `).join('') : '<tr><td colspan="9" class="text-center text-gray-500 py-4">暂无数据</td></tr>'}
                             </tbody>
                         </table>
                     </div>
+                    
+                    <!-- 分页 -->
+                    ${total > 0 ? `
+                    <div class="flex items-center justify-between mt-4 text-sm text-gray-500">
+                        <span>共 ${total} 条记录</span>
+                        <div class="flex items-center space-x-2">
+                            <button onclick="changePage_transactions(${page - 1})" ${page <= 1 ? 'disabled' : ''} class="px-3 py-1 border rounded hover:bg-gray-50 disabled:opacity-50">上一页</button>
+                            <span class="px-3 py-1 bg-blue-500 text-white rounded">${page}</span>
+                            <button onclick="changePage_transactions(${page + 1})" ${page * size >= total ? 'disabled' : ''} class="px-3 py-1 border rounded hover:bg-gray-50 disabled:opacity-50">下一页</button>
+                        </div>
+                    </div>
+                    ` : ''}
                 </div>
             </div>
         `;
+        
+        // 绑定事件
+        bindSearchEvents_transactions();
     } catch (error) {
         content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
     }
+}
+
+// 绑定查询事件
+function bindSearchEvents_transactions() {
+    window.doSearch_transactions = async () => {
+        const params = getSearchParams('transactions');
+        QueryCache.save('transactions', params);
+        await renderTransactions();
+    };
+    
+    window.resetSearch_transactions = () => {
+        QueryCache.clear('transactions');
+        document.getElementById('searchForm_transactions')?.querySelectorAll('input, select').forEach(el => {
+            el.value = '';
+        });
+        renderTransactions();
+    };
+    
+    window.toggleAdvanced_transactions = () => {
+        const advanced = document.getElementById('advanced_transactions');
+        if (advanced) {
+            advanced.classList.toggle('hidden');
+        }
+    };
+    
+    window.setQuickDate_transactions = (type) => {
+        const { start, end } = getQuickDateRange(type);
+        const startInput = document.getElementById('search_start_date');
+        const endInput = document.getElementById('search_end_date');
+        if (startInput) startInput.value = start;
+        if (endInput) endInput.value = end;
+    };
+    
+    window.changePage_transactions = (newPage) => {
+        const params = getSearchParams('transactions');
+        params.page = newPage;
+        QueryCache.save('transactions', params);
+        renderTransactions();
+    };
+    
+    window.exportData_transactions = async () => {
+        const params = getSearchParams('transactions');
+        const queryString = new URLSearchParams(params).toString();
+        window.location.href = `/api/v1/finance/transactions/export?${queryString}`;
+    };
 }
 
 async function renderDeposits() {
@@ -3387,38 +3816,72 @@ async function renderBets() {
     const content = document.getElementById('pageContent');
     
     try {
-        const res = await apiRequest('/bets');
-        const { list, total } = res.data;
+        // 获取查询参数
+        const params = getSearchParams('bets') || {};
+        const queryString = new URLSearchParams(params).toString();
+        const url = queryString ? `/bets?${queryString}` : '/bets';
+        
+        const res = await apiRequest(url);
+        const { list, total, page, size, summary } = res.data;
+        
+        // 生成查询表单配置
+        const searchFormHTML = generateSearchForm({
+            page: 'bets',
+            fields: [
+                { name: 'start_date', type: 'date', placeholder: '开始日期' },
+                { name: 'end_date', type: 'date', placeholder: '结束日期' },
+                {
+                    name: 'game_type',
+                    type: 'select',
+                    placeholder: '全部游戏',
+                    options: [
+                        { value: '百家乐', label: '百家乐' },
+                        { value: '龙虎', label: '龙虎' },
+                        { value: '轮盘', label: '轮盘' },
+                        { value: '骰宝', label: '骰宝' },
+                        { value: '牛牛', label: '牛牛' }
+                    ]
+                },
+                {
+                    name: 'status',
+                    type: 'select',
+                    placeholder: '全部状态',
+                    options: [
+                        { value: '0', label: '未结算' },
+                        { value: '1', label: '已结算' },
+                        { value: '2', label: '已取消' },
+                        { value: '3', label: '废单' }
+                    ]
+                }
+            ],
+            advanced: [
+                { name: 'bet_no', type: 'text', placeholder: '注单号' },
+                { name: 'username', type: 'text', placeholder: '玩家账号' },
+                { name: 'user_id', type: 'number', placeholder: '用户ID' },
+                { name: 'bet_amount_min', type: 'number', placeholder: '最小投注金额' },
+                { name: 'bet_amount_max', type: 'number', placeholder: '最大投注金额' }
+            ],
+            quickDates: true,
+            showExport: true
+        });
         
         content.innerHTML = `
             <div class="card">
                 <div class="card-header flex items-center justify-between">
-                    <span>注单列表</span>
-                    <div class="flex space-x-2">
-                        <button class="btn btn-success text-sm"><i class="fas fa-file-excel mr-1"></i>导出</button>
-                    </div>
+                    <span>注单列表 <span class="badge badge-primary ml-2">${total}</span></span>
+                    ${summary ? `
+                        <div class="flex items-center gap-4 text-sm">
+                            <span>总投注: ¥${formatNumber(summary.total_bet || 0)}</span>
+                            <span>有效投注: ¥${formatNumber(summary.total_valid_bet || 0)}</span>
+                            <span class="${(summary.total_win_loss || 0) >= 0 ? 'text-green-600' : 'text-red-600'}">
+                                输赢: ${(summary.total_win_loss || 0) >= 0 ? '+' : ''}¥${formatNumber(summary.total_win_loss || 0)}
+                            </span>
+                        </div>
+                    ` : ''}
                 </div>
                 <div class="card-body">
-                    <!-- 筛选 -->
-                    <div class="flex flex-wrap gap-4 mb-4">
-                        <input type="date" class="px-3 py-2 border rounded-lg">
-                        <select class="px-3 py-2 border rounded-lg">
-                            <option value="">全部游戏</option>
-                            <option value="百家乐">百家乐</option>
-                            <option value="龙虎">龙虎</option>
-                            <option value="轮盘">轮盘</option>
-                            <option value="骰宝">骰宝</option>
-                            <option value="牛牛">牛牛</option>
-                        </select>
-                        <select class="px-3 py-2 border rounded-lg">
-                            <option value="">全部状态</option>
-                            <option value="0">未结算</option>
-                            <option value="1">已结算</option>
-                            <option value="2">已取消</option>
-                            <option value="3">废单</option>
-                        </select>
-                        <button class="btn btn-primary">查询</button>
-                    </div>
+                    <!-- 查询表单 -->
+                    ${searchFormHTML}
                     
                     <div class="overflow-x-auto">
                         <table class="data-table">
@@ -3435,7 +3898,7 @@ async function renderBets() {
                                 </tr>
                             </thead>
                             <tbody>
-                                ${list.map(bet => `
+                                ${list && list.length > 0 ? list.map(bet => `
                                     <tr>
                                         <td>
                                             <div class="font-mono text-sm">${escapeHtml(bet.bet_no)}</div>
@@ -3453,21 +3916,81 @@ async function renderBets() {
                                         </td>
                                         <td>${getBetStatusBadge(bet.bet_status)}</td>
                                         <td>
-                                            <button class="text-blue-500 hover:text-blue-700" title="回放">
-                                                <i class="fas fa-play-circle"></i>
+                                            <button onclick="viewBetDetail(${parseInt(bet.bet_id) || 0})" class="text-blue-500 hover:text-blue-700" title="查看详情">
+                                                <i class="fas fa-eye"></i>
                                             </button>
                                         </td>
                                     </tr>
-                                `).join('')}
+                                `).join('') : '<tr><td colspan="8" class="text-center text-gray-500 py-4">暂无数据</td></tr>'}
                             </tbody>
                         </table>
                     </div>
+                    
+                    <!-- 分页 -->
+                    ${total > 0 ? `
+                    <div class="flex items-center justify-between mt-4 text-sm text-gray-500">
+                        <span>共 ${total} 条记录</span>
+                        <div class="flex items-center space-x-2">
+                            <button onclick="changePage_bets(${page - 1})" ${page <= 1 ? 'disabled' : ''} class="px-3 py-1 border rounded hover:bg-gray-50 disabled:opacity-50">上一页</button>
+                            <span class="px-3 py-1 bg-blue-500 text-white rounded">${page}</span>
+                            <button onclick="changePage_bets(${page + 1})" ${page * size >= total ? 'disabled' : ''} class="px-3 py-1 border rounded hover:bg-gray-50 disabled:opacity-50">下一页</button>
+                        </div>
+                    </div>
+                    ` : ''}
                 </div>
             </div>
         `;
+        
+        // 绑定事件
+        bindSearchEvents_bets();
     } catch (error) {
         content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
     }
+}
+
+// 绑定查询事件
+function bindSearchEvents_bets() {
+    window.doSearch_bets = async () => {
+        const params = getSearchParams('bets');
+        QueryCache.save('bets', params);
+        await renderBets();
+    };
+    
+    window.resetSearch_bets = () => {
+        QueryCache.clear('bets');
+        document.getElementById('searchForm_bets')?.querySelectorAll('input, select').forEach(el => {
+            el.value = '';
+        });
+        renderBets();
+    };
+    
+    window.toggleAdvanced_bets = () => {
+        const advanced = document.getElementById('advanced_bets');
+        if (advanced) {
+            advanced.classList.toggle('hidden');
+        }
+    };
+    
+    window.setQuickDate_bets = (type) => {
+        const { start, end } = getQuickDateRange(type);
+        const startInput = document.getElementById('search_start_date');
+        const endInput = document.getElementById('search_end_date');
+        if (startInput) startInput.value = start;
+        if (endInput) endInput.value = end;
+    };
+    
+    window.changePage_bets = (newPage) => {
+        const params = getSearchParams('bets');
+        params.page = newPage;
+        QueryCache.save('bets', params);
+        renderBets();
+    };
+    
+    window.exportData_bets = async () => {
+        const params = getSearchParams('bets');
+        const queryString = new URLSearchParams(params).toString();
+        window.location.href = `/api/v1/bets/export?${queryString}`;
+    };
 }
 
 // ==================== 洗码管理 ====================
@@ -3602,8 +4125,13 @@ async function renderCommissionRecords() {
     const content = document.getElementById('pageContent');
     
     try {
-        const res = await apiRequest('/commission/records');
-        const { list, total, summary } = res.data;
+        // 获取查询参数
+        const params = getSearchParams('commission_records') || {};
+        const queryString = new URLSearchParams(params).toString();
+        const url = queryString ? `/commission/records?${queryString}` : '/commission/records';
+        
+        const res = await apiRequest(url);
+        const { list, total, summary, page, size } = res.data;
         
         // 统计
         const pendingCount = list.filter(r => r.claim_status === 0).length;
@@ -3654,14 +4182,52 @@ async function renderCommissionRecords() {
                 
                 <div class="card">
                     <div class="card-header flex items-center justify-between">
-                        <span>洗码发放记录 <span class="badge badge-primary">${list.length}</span></span>
+                        <span>洗码发放记录 <span class="badge badge-primary">${total || list.length}</span></span>
                         <div class="flex space-x-2">
                             <button onclick="triggerCommissionCalculate()" class="btn btn-purple text-sm"><i class="fas fa-calculator mr-1"></i>手动计算</button>
                             <button class="btn btn-success text-sm">批量通过</button>
-                            <button class="btn btn-outline text-sm">导出</button>
+                            <button onclick="exportData_commission_records()" class="btn btn-outline text-sm">导出</button>
                         </div>
                     </div>
                     <div class="card-body">
+                        <!-- 查询表单 -->
+                        ${generateSearchForm({
+                            page: 'commission_records',
+                            fields: [
+                                { name: 'start_date', type: 'date', placeholder: '开始日期' },
+                                { name: 'end_date', type: 'date', placeholder: '结束日期' },
+                                {
+                                    name: 'claim_status',
+                                    type: 'select',
+                                    placeholder: '领取状态',
+                                    options: [
+                                        { value: '0', label: '待领取' },
+                                        { value: '1', label: '已领取' },
+                                        { value: '2', label: '已过期' },
+                                        { value: '3', label: '自动到账' }
+                                    ]
+                                },
+                                {
+                                    name: 'audit_status',
+                                    type: 'select',
+                                    placeholder: '审核状态',
+                                    options: [
+                                        { value: '0', label: '待审核' },
+                                        { value: '1', label: '已通过' },
+                                        { value: '2', label: '已拒绝' }
+                                    ]
+                                }
+                            ],
+                            advanced: [
+                                { name: 'username', type: 'text', placeholder: '会员账号' },
+                                { name: 'user_id', type: 'number', placeholder: '用户ID' },
+                                { name: 'commission_min', type: 'number', placeholder: '最小佣金金额' },
+                                { name: 'commission_max', type: 'number', placeholder: '最大佣金金额' }
+                            ],
+                            quickDates: true,
+                            showExport: true
+                        })}
+                        
                         <div class="overflow-x-auto">
                             <table class="data-table">
                                 <thead>
@@ -3707,9 +4273,50 @@ async function renderCommissionRecords() {
                 </div>
             </div>
         `;
+        
+        // 绑定事件
+        bindSearchEvents_commission_records();
     } catch (error) {
         content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
     }
+}
+
+// 绑定佣金记录查询事件
+function bindSearchEvents_commission_records() {
+    window.doSearch_commission_records = async () => {
+        const params = getSearchParams('commission_records');
+        QueryCache.save('commission_records', params);
+        await renderCommissionRecords();
+    };
+    
+    window.resetSearch_commission_records = () => {
+        QueryCache.clear('commission_records');
+        document.getElementById('searchForm_commission_records')?.querySelectorAll('input, select').forEach(el => {
+            el.value = '';
+        });
+        renderCommissionRecords();
+    };
+    
+    window.toggleAdvanced_commission_records = () => {
+        const advanced = document.getElementById('advanced_commission_records');
+        if (advanced) {
+            advanced.classList.toggle('hidden');
+        }
+    };
+    
+    window.setQuickDate_commission_records = (type) => {
+        const { start, end } = getQuickDateRange(type);
+        const startInput = document.getElementById('search_start_date');
+        const endInput = document.getElementById('search_end_date');
+        if (startInput) startInput.value = start;
+        if (endInput) endInput.value = end;
+    };
+    
+    window.exportData_commission_records = async () => {
+        const params = getSearchParams('commission_records');
+        const queryString = new URLSearchParams(params).toString();
+        window.location.href = `/api/v1/commission/records/export?${queryString}`;
+    };
 }
 
 // 获取领取状态徽章
