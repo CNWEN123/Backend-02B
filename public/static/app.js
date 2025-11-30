@@ -254,7 +254,7 @@ async function loadNotificationBadges() {
             }
         }
     } catch (e) {
-        console.log('Failed to load notification badges');
+        // 静默处理徽章加载失败
     }
 }
 
@@ -5166,8 +5166,6 @@ async function submitManualAdjustment(type) {
     const amount = parseFloat(document.getElementById('adjustAmount').value);
     const remark = document.getElementById('adjustRemark').value.trim();
     
-    console.log('[ManualAdjust] Input:', { userIdInput, amount, type, remark });
-    
     if (!userIdInput) {
         alert('请输入玩家账号或ID');
         return;
@@ -5191,18 +5189,14 @@ async function submitManualAdjustment(type) {
         // 如果输入的不是纯数字，先查询玩家ID
         let userId = userIdInput;
         if (!/^\d+$/.test(userIdInput)) {
-            console.log('[ManualAdjust] Searching player by username:', userIdInput);
             const searchRes = await apiRequest(`/players?username=${encodeURIComponent(userIdInput)}&size=1`);
-            console.log('[ManualAdjust] Search result:', searchRes);
             if (!searchRes.data?.list?.length) {
                 alert('未找到该玩家账号');
                 return;
             }
             userId = searchRes.data.list[0].user_id;
-            console.log('[ManualAdjust] Found user_id:', userId);
         }
         
-        console.log('[ManualAdjust] Submitting request:', { user_id: parseInt(userId), amount, type, remark });
         const res = await apiRequest('/finance/manual-adjustment', {
             method: 'POST',
             body: JSON.stringify({
@@ -5213,8 +5207,6 @@ async function submitManualAdjustment(type) {
             })
         });
         
-        console.log('[ManualAdjust] Response:', res);
-        
         if (res.success) {
             closeModal();
             alert(`${action}成功！\n订单号: ${res.data?.order_no || ''}`);
@@ -5223,7 +5215,6 @@ async function submitManualAdjustment(type) {
             alert(`${action}失败: ${res.message || '未知错误'}`);
         }
     } catch (error) {
-        console.error('[ManualAdjust] Error:', error);
         alert(`操作失败: ${error.message || '网络错误'}`);
     }
 }

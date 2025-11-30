@@ -257,7 +257,6 @@ function validateAmount(amount: any): { valid: boolean; value: number; error?: s
 }
 
 // 输入验证 - ID参数
-// 输入验证 - ID参数
 function validateId(id: string | undefined): number | null {
   if (!id) return null
   const num = parseInt(id)
