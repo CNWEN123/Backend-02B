@@ -1953,15 +1953,15 @@ async function viewBonusDetail(bonusId) {
 
 // ==================== 红利配置管理页面 ====================
 const bonusTypeOptions = {
-    'first_deposit': { label: '首存红利', color: 'green', icon: 'fa-gift' },
-    'deposit_bonus': { label: '存款红利', color: 'blue', icon: 'fa-coins' },
-    'activity': { label: '活动红利', color: 'purple', icon: 'fa-star' },
-    'rebate': { label: '返水红利', color: 'orange', icon: 'fa-undo' },
-    'birthday': { label: '生日红利', color: 'pink', icon: 'fa-birthday-cake' },
-    'vip_upgrade': { label: 'VIP晋级红利', color: 'yellow', icon: 'fa-crown' },
-    'weekly': { label: '每周红利', color: 'cyan', icon: 'fa-calendar-week' },
-    'monthly': { label: '每月红利', color: 'indigo', icon: 'fa-calendar-alt' },
-    'manual': { label: '人工红利', color: 'red', icon: 'fa-hand-paper' }
+    'first_deposit': { label: '首存红利', colorClass: 'bg-green-500', bgClass: 'bg-green-50', textClass: 'text-green-600', icon: 'fa-gift' },
+    'deposit_bonus': { label: '存款红利', colorClass: 'bg-blue-500', bgClass: 'bg-blue-50', textClass: 'text-blue-600', icon: 'fa-coins' },
+    'activity': { label: '活动红利', colorClass: 'bg-purple-500', bgClass: 'bg-purple-50', textClass: 'text-purple-600', icon: 'fa-star' },
+    'rebate': { label: '返水红利', colorClass: 'bg-orange-500', bgClass: 'bg-orange-50', textClass: 'text-orange-600', icon: 'fa-undo' },
+    'birthday': { label: '生日红利', colorClass: 'bg-pink-500', bgClass: 'bg-pink-50', textClass: 'text-pink-600', icon: 'fa-birthday-cake' },
+    'vip_upgrade': { label: 'VIP晋级红利', colorClass: 'bg-yellow-500', bgClass: 'bg-yellow-50', textClass: 'text-yellow-600', icon: 'fa-crown' },
+    'weekly': { label: '每周红利', colorClass: 'bg-cyan-500', bgClass: 'bg-cyan-50', textClass: 'text-cyan-600', icon: 'fa-calendar-week' },
+    'monthly': { label: '每月红利', colorClass: 'bg-indigo-500', bgClass: 'bg-indigo-50', textClass: 'text-indigo-600', icon: 'fa-calendar-alt' },
+    'manual': { label: '人工红利', colorClass: 'bg-red-500', bgClass: 'bg-red-50', textClass: 'text-red-600', icon: 'fa-hand-paper' }
 };
 
 const triggerTypeOptions = {
@@ -2025,90 +2025,80 @@ async function renderBonusConfigs() {
                 
                 <!-- 配置列表 -->
                 <div class="p-4">
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        ${configs.length === 0 ? `
-                            <div class="col-span-2 text-center py-10 text-gray-500">
-                                <i class="fas fa-inbox text-4xl mb-3"></i>
-                                <p>暂无红利配置</p>
-                                <button onclick="showAddBonusConfig()" class="btn btn-primary mt-4">
-                                    <i class="fas fa-plus mr-1"></i>添加首个配置
-                                </button>
-                            </div>
-                        ` : configs.map(c => {
-                            const typeInfo = bonusTypeOptions[c.bonus_type] || { label: c.bonus_type, color: 'gray', icon: 'fa-gift' };
-                            const triggerInfo = triggerTypeOptions[c.trigger_type] || triggerTypeOptions['manual'];
-                            return `
-                                <div class="border rounded-lg overflow-hidden hover:shadow-lg transition-shadow ${c.status !== 1 ? 'opacity-60' : ''}">
-                                    <div class="bg-gradient-to-r from-${typeInfo.color}-50 to-${typeInfo.color}-100 p-4 border-b">
-                                        <div class="flex items-center justify-between">
-                                            <div class="flex items-center">
-                                                <div class="w-10 h-10 rounded-full bg-${typeInfo.color}-500 text-white flex items-center justify-center mr-3">
-                                                    <i class="fas ${typeInfo.icon}"></i>
+                    ${configs.length === 0 ? `
+                        <div class="text-center py-10 text-gray-500">
+                            <i class="fas fa-inbox text-4xl mb-3 block"></i>
+                            <p>暂无红利配置</p>
+                            <button onclick="showAddBonusConfig()" class="btn btn-primary mt-4">
+                                <i class="fas fa-plus mr-1"></i>添加首个配置
+                            </button>
+                        </div>
+                    ` : `
+                    <div class="overflow-x-auto">
+                        <table class="data-table w-full">
+                            <thead>
+                                <tr>
+                                    <th class="text-left">配置名称</th>
+                                    <th class="text-left">红利类型</th>
+                                    <th class="text-center">红利比例</th>
+                                    <th class="text-center">红利上限</th>
+                                    <th class="text-center">最低存款</th>
+                                    <th class="text-center">有效天数</th>
+                                    <th class="text-center">流水规则</th>
+                                    <th class="text-center">触发方式</th>
+                                    <th class="text-center">状态</th>
+                                    <th class="text-center">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${configs.map(c => {
+                                    const typeInfo = bonusTypeOptions[c.bonus_type] || { label: c.bonus_type, colorClass: 'bg-gray-500', bgClass: 'bg-gray-50', textClass: 'text-gray-600', icon: 'fa-gift' };
+                                    const triggerInfo = triggerTypeOptions[c.trigger_type] || triggerTypeOptions['manual'];
+                                    return `
+                                        <tr class="${c.status !== 1 ? 'opacity-50' : ''}">
+                                            <td>
+                                                <div class="flex items-center">
+                                                    <div class="w-8 h-8 rounded-full ${typeInfo.colorClass} text-white flex items-center justify-center mr-2 flex-shrink-0">
+                                                        <i class="fas ${typeInfo.icon} text-xs"></i>
+                                                    </div>
+                                                    <div>
+                                                        <div class="font-medium">${escapeHtml(c.bonus_name)}</div>
+                                                        ${c.description ? `<div class="text-xs text-gray-400 truncate max-w-[150px]">${escapeHtml(c.description)}</div>` : ''}
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <div class="font-semibold text-gray-800">${escapeHtml(c.bonus_name)}</div>
-                                                    <span class="text-xs text-${typeInfo.color}-600">${typeInfo.label}</span>
+                                            </td>
+                                            <td><span class="badge ${typeInfo.bgClass} ${typeInfo.textClass}">${typeInfo.label}</span></td>
+                                            <td class="text-center font-semibold text-green-600">${c.bonus_percentage}%</td>
+                                            <td class="text-center">¥${formatNumber(c.max_bonus || 0)}</td>
+                                            <td class="text-center">¥${formatNumber(c.min_deposit || 0)}</td>
+                                            <td class="text-center">${c.valid_days || 30}天</td>
+                                            <td class="text-center text-sm">${c.turnover_rule_name || '<span class="text-gray-400">-</span>'}</td>
+                                            <td class="text-center">
+                                                ${c.auto_send === 1 ? `<span class="badge badge-purple"><i class="fas fa-robot mr-1"></i>${triggerInfo.label}</span>` : '<span class="text-gray-400">手动</span>'}
+                                            </td>
+                                            <td class="text-center">
+                                                <span class="badge ${c.status === 1 ? 'badge-success' : 'badge-danger'}">${c.status === 1 ? '启用' : '禁用'}</span>
+                                            </td>
+                                            <td class="text-center">
+                                                <div class="flex items-center justify-center space-x-1">
+                                                    <button onclick="toggleBonusConfigStatus(${c.config_id}, ${c.status === 1 ? 0 : 1})" class="${c.status === 1 ? 'text-orange-500 hover:text-orange-700' : 'text-green-500 hover:text-green-700'}" title="${c.status === 1 ? '禁用' : '启用'}">
+                                                        <i class="fas ${c.status === 1 ? 'fa-pause' : 'fa-play'}"></i>
+                                                    </button>
+                                                    <button onclick="showEditBonusConfig(${c.config_id})" class="text-blue-500 hover:text-blue-700 ml-2" title="编辑">
+                                                        <i class="fas fa-edit"></i>
+                                                    </button>
+                                                    <button onclick="deleteBonusConfig(${c.config_id})" class="text-red-500 hover:text-red-700 ml-2" title="删除">
+                                                        <i class="fas fa-trash"></i>
+                                                    </button>
                                                 </div>
-                                            </div>
-                                            <div class="flex items-center space-x-2">
-                                                ${c.auto_send === 1 ? '<span class="badge badge-purple"><i class="fas fa-robot mr-1"></i>自动</span>' : ''}
-                                                <span class="badge ${c.status === 1 ? 'badge-success' : 'badge-danger'}">
-                                                    ${c.status === 1 ? '启用' : '禁用'}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="p-4">
-                                        <div class="grid grid-cols-2 gap-3 text-sm mb-3">
-                                            <div class="flex items-center">
-                                                <i class="fas fa-percentage text-gray-400 w-5"></i>
-                                                <span class="text-gray-500 mr-1">比例:</span>
-                                                <span class="font-semibold text-green-600">${c.bonus_percentage}%</span>
-                                            </div>
-                                            <div class="flex items-center">
-                                                <i class="fas fa-coins text-gray-400 w-5"></i>
-                                                <span class="text-gray-500 mr-1">上限:</span>
-                                                <span class="font-semibold">¥${formatNumber(c.max_bonus || 0)}</span>
-                                            </div>
-                                            <div class="flex items-center">
-                                                <i class="fas fa-arrow-down text-gray-400 w-5"></i>
-                                                <span class="text-gray-500 mr-1">最低存:</span>
-                                                <span>¥${formatNumber(c.min_deposit || 0)}</span>
-                                            </div>
-                                            <div class="flex items-center">
-                                                <i class="fas fa-clock text-gray-400 w-5"></i>
-                                                <span class="text-gray-500 mr-1">有效期:</span>
-                                                <span>${c.valid_days || 30}天</span>
-                                            </div>
-                                            <div class="flex items-center">
-                                                <i class="fas fa-sync text-gray-400 w-5"></i>
-                                                <span class="text-gray-500 mr-1">流水:</span>
-                                                <span>${c.turnover_rule_name || '无要求'}</span>
-                                            </div>
-                                            <div class="flex items-center">
-                                                <i class="fas fa-bolt text-gray-400 w-5"></i>
-                                                <span class="text-gray-500 mr-1">触发:</span>
-                                                <span>${triggerInfo.label}</span>
-                                            </div>
-                                        </div>
-                                        ${c.vip_levels ? `<div class="text-xs text-gray-500 mb-2"><i class="fas fa-crown mr-1"></i>VIP等级: ${c.vip_levels}</div>` : ''}
-                                        ${c.description ? `<div class="text-xs text-gray-500 line-clamp-2">${escapeHtml(c.description)}</div>` : ''}
-                                        <div class="flex justify-end space-x-2 mt-3 pt-3 border-t">
-                                            <button onclick="toggleBonusConfigStatus(${c.config_id}, ${c.status === 1 ? 0 : 1})" class="btn btn-sm ${c.status === 1 ? 'btn-outline text-orange-500' : 'btn-outline text-green-500'}">
-                                                <i class="fas ${c.status === 1 ? 'fa-pause' : 'fa-play'} mr-1"></i>${c.status === 1 ? '禁用' : '启用'}
-                                            </button>
-                                            <button onclick="showEditBonusConfig(${c.config_id})" class="btn btn-sm btn-outline">
-                                                <i class="fas fa-edit mr-1"></i>编辑
-                                            </button>
-                                            <button onclick="deleteBonusConfig(${c.config_id})" class="btn btn-sm btn-outline text-red-500 hover:bg-red-50">
-                                                <i class="fas fa-trash mr-1"></i>删除
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            `;
-                        }).join('')}
+                                            </td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
                     </div>
+                    `}
                 </div>
             </div>
         `;
@@ -4428,76 +4418,312 @@ async function renderShifts() {
     
     try {
         const today = new Date().toISOString().split('T')[0];
-        const res = await apiRequest(`/shifts?date=${today}`);
-        const list = res.data || [];
+        const [shiftsRes, dealersRes, tablesRes] = await Promise.all([
+            apiRequest(`/shifts?date=${today}`),
+            apiRequest('/dealers'),
+            apiRequest('/tables')
+        ]);
+        
+        const list = shiftsRes.data || [];
+        const dealers = dealersRes.data?.list || [];
+        const tables = tablesRes.data?.list || [];
         
         // 按桌台分组
         const tableShifts = {};
         list.forEach(shift => {
             if (!tableShifts[shift.table_code]) {
                 tableShifts[shift.table_code] = {
-                    table_name: shift.table_name,
+                    table_name: shift.table_name || shift.table_code,
                     shifts: []
                 };
             }
             tableShifts[shift.table_code].shifts.push(shift);
         });
         
+        // 班次颜色
+        const shiftColors = ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-orange-500', 'bg-pink-500', 'bg-cyan-500'];
+        
         content.innerHTML = `
             <div class="card">
-                <div class="card-header flex items-center justify-between">
-                    <span>智能排班 - ${today}</span>
-                    <div class="flex space-x-2">
-                        <input type="date" value="${today}" class="px-3 py-2 border rounded-lg text-sm">
-                        <button class="btn btn-primary text-sm"><i class="fas fa-plus mr-1"></i>新增排班</button>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <!-- 甘特图时间轴 -->
-                    <div class="overflow-x-auto">
-                        <div class="min-w-[1200px]">
-                            <!-- 时间刻度 -->
-                            <div class="flex border-b pb-2 mb-4">
-                                <div class="w-32 flex-shrink-0 font-medium">桌台</div>
-                                <div class="flex-1 flex">
-                                    ${Array.from({length: 24}, (_, i) => `
-                                        <div class="flex-1 text-center text-sm text-gray-500">${String(i).padStart(2, '0')}:00</div>
-                                    `).join('')}
-                                </div>
-                            </div>
-                            
-                            <!-- 排班行 -->
-                            ${Object.entries(tableShifts).map(([code, data]) => `
-                                <div class="flex items-center mb-3">
-                                    <div class="w-32 flex-shrink-0">
-                                        <div class="font-medium">${code}</div>
-                                        <div class="text-xs text-gray-500">${data.table_name}</div>
-                                    </div>
-                                    <div class="flex-1 relative h-10 bg-gray-100 rounded">
-                                        ${data.shifts.map(shift => {
-                                            const startHour = parseInt(shift.start_time.split(':')[0]);
-                                            const endHour = parseInt(shift.end_time.split(':')[0]) || 24;
-                                            const left = (startHour / 24) * 100;
-                                            const width = ((endHour - startHour) / 24) * 100;
-                                            return `
-                                                <div class="absolute top-1 h-8 bg-blue-500 text-white text-xs rounded px-2 flex items-center overflow-hidden"
-                                                     style="left: ${left}%; width: ${width}%;">
-                                                    ${shift.stage_name_cn}
-                                                </div>
-                                            `;
-                                        }).join('')}
-                                    </div>
-                                </div>
-                            `).join('')}
-                            
-                            ${Object.keys(tableShifts).length === 0 ? '<div class="text-center text-gray-500 py-10">暂无排班数据</div>' : ''}
+                <div class="card-header">
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div class="flex items-center">
+                            <i class="fas fa-calendar-alt mr-2 text-purple-500"></i>
+                            <span class="font-semibold">智能排班管理</span>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <input type="date" id="shiftDate" value="${today}" class="px-3 py-2 border rounded-lg text-sm" onchange="loadShiftsByDate()">
+                            <button onclick="loadShiftsByDate()" class="btn btn-outline text-sm">
+                                <i class="fas fa-sync mr-1"></i>刷新
+                            </button>
+                            <button onclick="showAddShift()" class="btn btn-primary text-sm">
+                                <i class="fas fa-plus mr-1"></i>新增排班
+                            </button>
                         </div>
                     </div>
                 </div>
+                <div class="card-body p-0">
+                    <!-- 统计信息 -->
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 bg-gray-50 border-b">
+                        <div class="bg-white rounded-lg p-3 text-center shadow-sm">
+                            <div class="text-xl font-bold text-blue-600">${Object.keys(tableShifts).length}</div>
+                            <div class="text-xs text-gray-500">排班桌台</div>
+                        </div>
+                        <div class="bg-white rounded-lg p-3 text-center shadow-sm">
+                            <div class="text-xl font-bold text-green-600">${list.length}</div>
+                            <div class="text-xs text-gray-500">班次数量</div>
+                        </div>
+                        <div class="bg-white rounded-lg p-3 text-center shadow-sm">
+                            <div class="text-xl font-bold text-purple-600">${new Set(list.map(s => s.dealer_id)).size}</div>
+                            <div class="text-xs text-gray-500">值班荷官</div>
+                        </div>
+                        <div class="bg-white rounded-lg p-3 text-center shadow-sm">
+                            <div class="text-xl font-bold text-orange-600">${tables.length}</div>
+                            <div class="text-xs text-gray-500">总桌台数</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 排班表格 -->
+                    <div class="p-4">
+                        ${Object.keys(tableShifts).length === 0 ? `
+                            <div class="text-center py-10 text-gray-500">
+                                <i class="fas fa-calendar-times text-4xl mb-3 block"></i>
+                                <p>当日暂无排班数据</p>
+                                <button onclick="showAddShift()" class="btn btn-primary mt-4">
+                                    <i class="fas fa-plus mr-1"></i>添加排班
+                                </button>
+                            </div>
+                        ` : `
+                            <div class="overflow-x-auto">
+                                <table class="data-table w-full">
+                                    <thead>
+                                        <tr>
+                                            <th class="text-left" style="min-width:100px">桌台</th>
+                                            <th class="text-left" style="min-width:100px">荷官</th>
+                                            <th class="text-center" style="min-width:80px">班次</th>
+                                            <th class="text-center" style="min-width:120px">时间段</th>
+                                            <th class="text-center" style="min-width:80px">状态</th>
+                                            <th class="text-center" style="min-width:100px">操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${list.map((shift, idx) => `
+                                            <tr>
+                                                <td>
+                                                    <div class="font-medium">${escapeHtml(shift.table_code || '-')}</div>
+                                                    <div class="text-xs text-gray-400">${escapeHtml(shift.table_name || '')}</div>
+                                                </td>
+                                                <td>
+                                                    <div class="flex items-center">
+                                                        <div class="w-8 h-8 rounded-full bg-gradient-to-r from-pink-400 to-purple-400 text-white flex items-center justify-center mr-2 text-xs flex-shrink-0">
+                                                            ${(shift.stage_name_cn || shift.dealer_name || '?')[0]}
+                                                        </div>
+                                                        <div>
+                                                            <div class="font-medium">${escapeHtml(shift.stage_name_cn || shift.dealer_name || '-')}</div>
+                                                            <div class="text-xs text-gray-400">${escapeHtml(shift.stage_name_en || '')}</div>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td class="text-center">
+                                                    <span class="inline-block px-2 py-1 rounded text-xs text-white ${shiftColors[idx % shiftColors.length]}">
+                                                        ${shift.shift_type || '常规'}
+                                                    </span>
+                                                </td>
+                                                <td class="text-center">
+                                                    <span class="font-mono text-sm">${shift.start_time || '00:00'}</span>
+                                                    <span class="text-gray-400 mx-1">-</span>
+                                                    <span class="font-mono text-sm">${shift.end_time || '00:00'}</span>
+                                                </td>
+                                                <td class="text-center">
+                                                    <span class="badge ${shift.status === 1 ? 'badge-success' : 'badge-warning'}">
+                                                        ${shift.status === 1 ? '已确认' : '待确认'}
+                                                    </span>
+                                                </td>
+                                                <td class="text-center">
+                                                    <button onclick="editShift(${shift.shift_id})" class="text-blue-500 hover:text-blue-700 mr-2" title="编辑">
+                                                        <i class="fas fa-edit"></i>
+                                                    </button>
+                                                    <button onclick="deleteShift(${shift.shift_id})" class="text-red-500 hover:text-red-700" title="删除">
+                                                        <i class="fas fa-trash"></i>
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        `}
+                    </div>
+                    
+                    <!-- 时间线视图 -->
+                    ${Object.keys(tableShifts).length > 0 ? `
+                    <div class="p-4 border-t bg-gray-50">
+                        <h4 class="font-semibold text-gray-700 mb-3"><i class="fas fa-clock mr-1"></i>时间线视图</h4>
+                        <div class="overflow-x-auto">
+                            <div style="min-width: 800px;">
+                                <!-- 时间刻度 -->
+                                <div class="flex items-center border-b pb-2 mb-3">
+                                    <div class="w-24 flex-shrink-0 text-sm font-medium text-gray-600">桌台</div>
+                                    <div class="flex-1 flex">
+                                        ${[0,2,4,6,8,10,12,14,16,18,20,22].map(h => `
+                                            <div class="flex-1 text-center text-xs text-gray-400">${String(h).padStart(2,'0')}:00</div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                                <!-- 排班行 -->
+                                ${Object.entries(tableShifts).map(([code, data]) => `
+                                    <div class="flex items-center mb-2">
+                                        <div class="w-24 flex-shrink-0">
+                                            <div class="text-sm font-medium">${escapeHtml(code)}</div>
+                                        </div>
+                                        <div class="flex-1 relative h-8 bg-gray-200 rounded overflow-hidden">
+                                            ${data.shifts.map((shift, idx) => {
+                                                const startParts = (shift.start_time || '0:0').split(':');
+                                                const endParts = (shift.end_time || '24:0').split(':');
+                                                const startHour = parseInt(startParts[0]) + parseInt(startParts[1] || 0) / 60;
+                                                let endHour = parseInt(endParts[0]) + parseInt(endParts[1] || 0) / 60;
+                                                if (endHour <= startHour) endHour = 24;
+                                                const left = (startHour / 24) * 100;
+                                                const width = Math.max(((endHour - startHour) / 24) * 100, 2);
+                                                return `
+                                                    <div class="absolute top-0 h-full ${shiftColors[idx % shiftColors.length]} text-white text-xs flex items-center justify-center overflow-hidden rounded"
+                                                         style="left: ${left}%; width: ${width}%;" title="${shift.stage_name_cn || ''} ${shift.start_time}-${shift.end_time}">
+                                                        <span class="truncate px-1">${shift.stage_name_cn || ''}</span>
+                                                    </div>
+                                                `;
+                                            }).join('')}
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                    ` : ''}
+                </div>
             </div>
         `;
+        
+        // 存储数据供弹窗使用
+        window._shiftDealers = dealers;
+        window._shiftTables = tables;
+        
     } catch (error) {
-        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+async function loadShiftsByDate() {
+    renderShifts();
+}
+
+function showAddShift() {
+    const dealers = window._shiftDealers || [];
+    const tables = window._shiftTables || [];
+    const today = document.getElementById('shiftDate')?.value || new Date().toISOString().split('T')[0];
+    
+    openModal(`
+        <div class="card-header"><i class="fas fa-plus mr-2 text-green-500"></i>新增排班</div>
+        <div class="p-6">
+            <form id="addShiftForm" class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">日期 *</label>
+                        <input type="date" id="shiftDateInput" value="${today}" required class="form-input w-full">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">桌台 *</label>
+                        <select id="shiftTable" required class="form-input w-full">
+                            <option value="">请选择桌台</option>
+                            ${tables.map(t => `<option value="${t.table_id}">${escapeHtml(t.table_code)} - ${escapeHtml(t.table_name || '')}</option>`).join('')}
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">荷官 *</label>
+                    <select id="shiftDealer" required class="form-input w-full">
+                        <option value="">请选择荷官</option>
+                        ${dealers.map(d => `<option value="${d.dealer_id}">${escapeHtml(d.stage_name_cn || d.real_name)} (${escapeHtml(d.stage_name_en || '')})</option>`).join('')}
+                    </select>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">开始时间 *</label>
+                        <input type="time" id="shiftStartTime" value="09:00" required class="form-input w-full">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">结束时间 *</label>
+                        <input type="time" id="shiftEndTime" value="17:00" required class="form-input w-full">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">班次类型</label>
+                    <select id="shiftType" class="form-input w-full">
+                        <option value="早班">早班</option>
+                        <option value="中班">中班</option>
+                        <option value="晚班">晚班</option>
+                        <option value="全天">全天</option>
+                    </select>
+                </div>
+                <div class="flex justify-end space-x-2 pt-4">
+                    <button type="button" onclick="closeModal()" class="btn btn-outline">取消</button>
+                    <button type="submit" class="btn btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    `);
+    
+    document.getElementById('addShiftForm').onsubmit = async (e) => {
+        e.preventDefault();
+        await submitAddShift();
+    };
+}
+
+async function submitAddShift() {
+    const data = {
+        shift_date: document.getElementById('shiftDateInput').value,
+        table_id: parseInt(document.getElementById('shiftTable').value),
+        dealer_id: parseInt(document.getElementById('shiftDealer').value),
+        start_time: document.getElementById('shiftStartTime').value,
+        end_time: document.getElementById('shiftEndTime').value,
+        shift_type: document.getElementById('shiftType').value,
+        status: 1
+    };
+    
+    try {
+        const res = await apiRequest('/shifts', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+        
+        if (res.success) {
+            alert('排班已添加');
+            closeModal();
+            renderShifts();
+        } else {
+            alert(res.message || '添加失败');
+        }
+    } catch (error) {
+        alert('添加失败: ' + error.message);
+    }
+}
+
+async function editShift(shiftId) {
+    alert('编辑排班功能开发中...');
+}
+
+async function deleteShift(shiftId) {
+    if (!confirm('确定要删除此排班记录吗？')) return;
+    
+    try {
+        const res = await apiRequest(`/shifts/${shiftId}`, { method: 'DELETE' });
+        if (res.success) {
+            alert('已删除');
+            renderShifts();
+        } else {
+            alert(res.message || '删除失败');
+        }
+    } catch (error) {
+        alert('删除失败: ' + error.message);
     }
 }
 
