@@ -341,6 +341,59 @@ app.use('/api/v1/bonus/*', authMiddleware)
 
 // ==================== 认证API ====================
 
+// 临时初始化API - 用于快速创建测试数据
+app.post('/api/v1/system/quick-init', async (c) => {
+  try {
+    // 创建管理员角色
+    await c.env.DB.prepare(`
+      INSERT OR IGNORE INTO admin_roles (role_id, role_name, permissions, description) 
+      VALUES (1, '超级管理员', '["*"]', '拥有所有权限')
+    `).run()
+
+    // 创建管理员账号 (明文密码: admin123)
+    await c.env.DB.prepare(`
+      INSERT OR IGNORE INTO admin_users (admin_id, username, password_hash, nickname, role_id, status, two_fa_enabled) 
+      VALUES (1, 'admin', 'admin123', '系统管理员', 1, 1, 0)
+    `).run()
+
+    // 创建洗码方案
+    await c.env.DB.prepare(`
+      INSERT OR IGNORE INTO commission_schemes (scheme_id, scheme_name, baccarat_rate, status) 
+      VALUES (1, '默认方案', 0.008, 1)
+    `).run()
+
+    // 创建测试代理（带邀请码和专属域名）
+    await c.env.DB.prepare(`
+      INSERT OR IGNORE INTO agents (agent_id, agent_username, password_hash, nickname, level, invite_code, custom_domain, custom_domain_status, status) 
+      VALUES 
+      (1, 'agent001', 'password123', '测试代理', 3, 'AG001XYZ', 'agent001.demo.com', 0, 1),
+      (2, 'shareholder001', 'password123', '测试股东', 1, 'SH001ABC', 'sh001.demo.com', 1, 1)
+    `).run()
+
+    // 创建测试玩家
+    await c.env.DB.prepare(`
+      INSERT OR IGNORE INTO users (user_id, username, password_hash, nickname, agent_id, balance, status) 
+      VALUES (1, 'player001', 'password123', '测试玩家', 1, 5000.00, 1)
+    `).run()
+
+    return c.json({ 
+      success: true, 
+      message: '初始化成功！',
+      data: {
+        admin: { username: 'admin', password: 'admin123' },
+        agents: [
+          { username: 'shareholder001', password: 'password123', invite_code: 'SH001ABC', domain: 'sh001.demo.com' },
+          { username: 'agent001', password: 'password123', invite_code: 'AG001XYZ', domain: 'agent001.demo.com' }
+        ],
+        player: { username: 'player001', password: 'password123' }
+      }
+    })
+  } catch (error: any) {
+    console.error('Quick init error:', error)
+    return c.json({ success: false, message: error.message || '初始化失败' }, 500)
+  }
+})
+
 // 登录
 app.post('/api/v1/auth/login', async (c) => {
   try {
