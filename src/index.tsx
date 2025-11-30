@@ -1196,10 +1196,21 @@ app.get('/api/v1/agents/:agent_id', async (c) => {
   }
 })
 
+// 生成唯一邀请码
+function generateInviteCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // 排除易混淆字符
+  let code = ''
+  const randomBytes = crypto.getRandomValues(new Uint8Array(8))
+  for (let i = 0; i < 8; i++) {
+    code += chars[randomBytes[i] % chars.length]
+  }
+  return code
+}
+
 // 创建代理
 app.post('/api/v1/agents', async (c) => {
   const admin = c.get('admin')
-  const { agent_username, password, nickname, parent_agent_id, level, share_ratio, commission_ratio, currency, default_commission_scheme_id, contact_phone, remark } = await c.req.json()
+  const { agent_username, password, nickname, parent_agent_id, level, share_ratio, commission_ratio, currency, default_commission_scheme_id, contact_phone, remark, custom_domain } = await c.req.json()
   const clientIP = getClientIP(c)
 
   // 输入验证
@@ -1210,22 +1221,47 @@ app.post('/api/v1/agents', async (c) => {
   if (!password || typeof password !== 'string' || password.length < 6) {
     return c.json({ success: false, message: '请设置至少6位的密码' }, 400)
   }
+  
+  // 验证专属域名格式（如果提供）
+  if (custom_domain && typeof custom_domain === 'string' && custom_domain.trim()) {
+    const domainRegex = /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/
+    if (!domainRegex.test(custom_domain.trim())) {
+      return c.json({ success: false, message: '专属域名格式错误' }, 400)
+    }
+  }
 
   try {
     // 对密码进行哈希处理
     const passwordHash = await hashPassword(password)
     
+    // 生成唯一邀请码
+    const inviteCode = generateInviteCode()
+    
     const result = await c.env.DB.prepare(`
-      INSERT INTO agents (agent_username, password_hash, nickname, parent_agent_id, level, share_ratio, commission_ratio, currency, default_commission_scheme_id, contact_phone, remark)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(agent_username.trim(), passwordHash, nickname || null, parent_agent_id || null, level || 3, share_ratio || 0, commission_ratio || 0, currency || 'CNY', default_commission_scheme_id || null, contact_phone || null, remark || null).run()
+      INSERT INTO agents (agent_username, password_hash, nickname, parent_agent_id, level, share_ratio, commission_ratio, currency, default_commission_scheme_id, contact_phone, remark, invite_code, custom_domain)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      agent_username.trim(), 
+      passwordHash, 
+      nickname || null, 
+      parent_agent_id || null, 
+      level || 3, 
+      share_ratio || 0, 
+      commission_ratio || 0, 
+      currency || 'CNY', 
+      default_commission_scheme_id || null, 
+      contact_phone || null, 
+      remark || null,
+      inviteCode,
+      custom_domain?.trim() || null
+    ).run()
 
     // 记录审计日志
     await c.env.DB.prepare(
       'INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, target_id, new_value, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)'
     ).bind(admin.admin_id, admin.username, 'CREATE_AGENT', 'agents', result.meta.last_row_id, agent_username, clientIP).run()
 
-    return c.json({ success: true, data: { agent_id: result.meta.last_row_id } })
+    return c.json({ success: true, data: { agent_id: result.meta.last_row_id, invite_code: inviteCode } })
   } catch (error: any) {
     if (error.message?.includes('UNIQUE')) {
       return c.json({ success: false, message: '代理账号已存在' }, 400)
@@ -1238,7 +1274,15 @@ app.post('/api/v1/agents', async (c) => {
 // 更新代理
 app.put('/api/v1/agents/:agent_id', async (c) => {
   const agent_id = c.req.param('agent_id')
-  const { nickname, share_ratio, commission_ratio, default_commission_scheme_id, contact_phone, remark, status } = await c.req.json()
+  const { nickname, share_ratio, commission_ratio, default_commission_scheme_id, contact_phone, remark, status, custom_domain, invite_url } = await c.req.json()
+
+  // 验证专属域名格式（如果提供）
+  if (custom_domain !== undefined && custom_domain !== null && custom_domain !== '') {
+    const domainRegex = /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/
+    if (!domainRegex.test(custom_domain.trim())) {
+      return c.json({ success: false, message: '专属域名格式错误' }, 400)
+    }
+  }
 
   try {
     await c.env.DB.prepare(`
@@ -1250,13 +1294,163 @@ app.put('/api/v1/agents/:agent_id', async (c) => {
         contact_phone = COALESCE(?, contact_phone),
         remark = COALESCE(?, remark),
         status = COALESCE(?, status),
+        custom_domain = COALESCE(?, custom_domain),
+        invite_url = COALESCE(?, invite_url),
+        custom_domain_status = CASE WHEN ? IS NOT NULL AND ? != custom_domain THEN 0 ELSE custom_domain_status END,
         updated_at = CURRENT_TIMESTAMP
       WHERE agent_id = ?
-    `).bind(nickname, share_ratio, commission_ratio, default_commission_scheme_id, contact_phone, remark, status, agent_id).run()
+    `).bind(
+      nickname, share_ratio, commission_ratio, default_commission_scheme_id, 
+      contact_phone, remark, status, 
+      custom_domain !== undefined ? (custom_domain || null) : undefined,
+      invite_url,
+      custom_domain, custom_domain,
+      agent_id
+    ).run()
 
     return c.json({ success: true, message: '更新成功' })
   } catch (error) {
+    console.error('Update agent error:', error)
     return c.json({ success: false, message: '更新失败' }, 500)
+  }
+})
+
+// 生成/重置代理邀请码
+app.post('/api/v1/agents/:agent_id/generate-invite-code', async (c) => {
+  const agent_id = validateId(c.req.param('agent_id'))
+  if (!agent_id) {
+    return c.json({ success: false, message: '无效的代理ID' }, 400)
+  }
+  
+  const admin = c.get('admin')
+  const clientIP = getClientIP(c)
+
+  try {
+    // 检查代理是否存在
+    const agent = await c.env.DB.prepare('SELECT agent_id, agent_username FROM agents WHERE agent_id = ?').bind(agent_id).first()
+    if (!agent) {
+      return c.json({ success: false, message: '代理不存在' }, 404)
+    }
+
+    // 生成新邀请码
+    const newInviteCode = generateInviteCode()
+    
+    await c.env.DB.prepare(
+      'UPDATE agents SET invite_code = ?, updated_at = CURRENT_TIMESTAMP WHERE agent_id = ?'
+    ).bind(newInviteCode, agent_id).run()
+
+    // 记录审计日志
+    await c.env.DB.prepare(
+      'INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, target_id, new_value, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(admin.admin_id, admin.username, 'GENERATE_INVITE_CODE', 'agents', agent_id, newInviteCode, clientIP).run()
+
+    return c.json({ success: true, message: '邀请码生成成功', data: { invite_code: newInviteCode } })
+  } catch (error) {
+    console.error('Generate invite code error:', error)
+    return c.json({ success: false, message: '生成邀请码失败' }, 500)
+  }
+})
+
+// 更新代理分享链接
+app.put('/api/v1/agents/:agent_id/invite-url', async (c) => {
+  const agent_id = validateId(c.req.param('agent_id'))
+  if (!agent_id) {
+    return c.json({ success: false, message: '无效的代理ID' }, 400)
+  }
+  
+  const { invite_url } = await c.req.json()
+  
+  // 验证URL格式
+  if (invite_url && typeof invite_url === 'string') {
+    try {
+      new URL(invite_url)
+    } catch {
+      return c.json({ success: false, message: '分享链接格式错误' }, 400)
+    }
+  }
+
+  try {
+    await c.env.DB.prepare(
+      'UPDATE agents SET invite_url = ?, updated_at = CURRENT_TIMESTAMP WHERE agent_id = ?'
+    ).bind(invite_url || null, agent_id).run()
+
+    return c.json({ success: true, message: '分享链接更新成功' })
+  } catch (error) {
+    return c.json({ success: false, message: '更新失败' }, 500)
+  }
+})
+
+// 验证专属域名（模拟验证，实际需要DNS验证）
+app.post('/api/v1/agents/:agent_id/verify-domain', async (c) => {
+  const agent_id = validateId(c.req.param('agent_id'))
+  if (!agent_id) {
+    return c.json({ success: false, message: '无效的代理ID' }, 400)
+  }
+  
+  const admin = c.get('admin')
+  const clientIP = getClientIP(c)
+
+  try {
+    const agent = await c.env.DB.prepare('SELECT agent_id, custom_domain FROM agents WHERE agent_id = ?').bind(agent_id).first()
+    if (!agent) {
+      return c.json({ success: false, message: '代理不存在' }, 404)
+    }
+    
+    if (!agent.custom_domain) {
+      return c.json({ success: false, message: '请先设置专属域名' }, 400)
+    }
+
+    // 这里模拟DNS验证成功（实际应该检查DNS记录）
+    // 实际生产环境需要验证DNS CNAME记录是否指向正确的目标
+    await c.env.DB.prepare(`
+      UPDATE agents SET 
+        custom_domain_status = 1, 
+        custom_domain_verified_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP 
+      WHERE agent_id = ?
+    `).bind(agent_id).run()
+
+    // 记录审计日志
+    await c.env.DB.prepare(
+      'INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, target_id, new_value, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(admin.admin_id, admin.username, 'VERIFY_DOMAIN', 'agents', agent_id, agent.custom_domain, clientIP).run()
+
+    return c.json({ success: true, message: '域名验证成功' })
+  } catch (error) {
+    console.error('Verify domain error:', error)
+    return c.json({ success: false, message: '域名验证失败' }, 500)
+  }
+})
+
+// 根据邀请码获取代理信息（用于注册页面）
+app.get('/api/v1/public/agent-by-invite/:invite_code', async (c) => {
+  const invite_code = c.req.param('invite_code')
+  
+  if (!invite_code || invite_code.length !== 8) {
+    return c.json({ success: false, message: '无效的邀请码' }, 400)
+  }
+
+  try {
+    const agent = await c.env.DB.prepare(`
+      SELECT agent_id, agent_username, nickname, level 
+      FROM agents 
+      WHERE invite_code = ? AND status = 1
+    `).bind(invite_code.toUpperCase()).first()
+
+    if (!agent) {
+      return c.json({ success: false, message: '邀请码无效或代理已禁用' }, 404)
+    }
+
+    return c.json({ 
+      success: true, 
+      data: {
+        agent_id: agent.agent_id,
+        agent_name: agent.nickname || agent.agent_username,
+        level: agent.level
+      }
+    })
+  } catch (error) {
+    return c.json({ success: false, message: '查询失败' }, 500)
   }
 })
 

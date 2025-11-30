@@ -53,6 +53,13 @@ CREATE TABLE IF NOT EXISTS agents (
     balance DECIMAL(18,4) DEFAULT 0,
     contact_phone VARCHAR(20),
     ip_whitelist TEXT,
+    -- 分享链接字段
+    invite_code VARCHAR(20) UNIQUE, -- 邀请码，用于生成分享链接
+    invite_url VARCHAR(500), -- 完整分享链接
+    -- 专属域名字段
+    custom_domain VARCHAR(255), -- 专属域名
+    custom_domain_status TINYINT DEFAULT 0, -- 0=未验证 1=已验证 2=验证失败
+    custom_domain_verified_at DATETIME, -- 域名验证时间
     remark TEXT,
     last_login_ip VARCHAR(45),
     last_login_at DATETIME,

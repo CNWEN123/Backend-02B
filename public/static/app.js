@@ -1230,6 +1230,7 @@ async function renderAgents() {
                                         <th>余额</th>
                                         <th>占成</th>
                                         <th>佣金</th>
+                                        <th>分享链接</th>
                                         <th>下级/玩家</th>
                                         <th>状态</th>
                                         <th>操作</th>
@@ -1245,6 +1246,16 @@ async function renderAgents() {
                                             <td class="text-green-600">¥ ${formatNumber(agent.balance)}</td>
                                             <td><span class="badge badge-purple">${agent.share_ratio}%</span></td>
                                             <td><span class="badge badge-info">${agent.commission_ratio}%</span></td>
+                                            <td>
+                                                ${agent.invite_code ? `
+                                                    <div class="flex items-center gap-1">
+                                                        <span class="text-xs font-mono bg-gray-100 px-2 py-0.5 rounded">${escapeHtml(agent.invite_code)}</span>
+                                                        <button onclick="copyInviteCode('${escapeAttr(agent.invite_code)}')" class="text-blue-500 hover:text-blue-700" title="复制邀请码">
+                                                            <i class="fas fa-copy text-xs"></i>
+                                                        </button>
+                                                    </div>
+                                                ` : '<span class="text-gray-400 text-xs">未设置</span>'}
+                                            </td>
                                             <td>${agent.sub_agent_count || 0} / ${agent.player_count || 0}</td>
                                             <td>${getStatusBadge(agent.status)}</td>
                                             <td>
@@ -1254,6 +1265,9 @@ async function renderAgents() {
                                                     </button>
                                                     <button onclick="viewAgentDetail(${agent.agent_id})" class="text-green-500 hover:text-green-700" title="详情">
                                                         <i class="fas fa-eye"></i>
+                                                    </button>
+                                                    <button onclick="showAgentShareSettings(${agent.agent_id})" class="text-purple-500 hover:text-purple-700" title="分享设置">
+                                                        <i class="fas fa-share-alt"></i>
                                                     </button>
                                                     <button onclick="toggleAgentStatus(${agent.agent_id}, ${agent.status})" class="text-${agent.status === 1 ? 'orange' : 'green'}-500 hover:text-${agent.status === 1 ? 'orange' : 'green'}-700" title="${agent.status === 1 ? '禁用' : '启用'}">
                                                         <i class="fas fa-${agent.status === 1 ? 'ban' : 'check'}"></i>
@@ -1271,6 +1285,229 @@ async function renderAgents() {
         `;
     } catch (error) {
         content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+// 复制邀请码
+function copyInviteCode(code) {
+    navigator.clipboard.writeText(code).then(() => {
+        alert('邀请码已复制: ' + code);
+    }).catch(() => {
+        // 兼容旧浏览器
+        const input = document.createElement('input');
+        input.value = code;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+        alert('邀请码已复制: ' + code);
+    });
+}
+
+// 显示代理分享设置弹窗
+async function showAgentShareSettings(agentId) {
+    try {
+        const res = await apiRequest(`/agents/${agentId}`);
+        if (!res.success) {
+            alert('获取代理信息失败');
+            return;
+        }
+        const agent = res.data;
+        const baseUrl = window.location.origin;
+        const defaultInviteUrl = agent.invite_code ? `${baseUrl}/register?ref=${agent.invite_code}` : '';
+        
+        openModal(`
+            <div class="p-6" style="min-width: 650px;">
+                <h3 class="text-lg font-bold mb-4"><i class="fas fa-share-alt text-purple-500 mr-2"></i>分享与域名设置</h3>
+                <div class="space-y-4">
+                    <!-- 代理信息 -->
+                    <div class="bg-gray-50 p-3 rounded-lg flex items-center gap-4">
+                        <div class="p-2 rounded-full bg-purple-100"><i class="fas fa-user-tie text-purple-500"></i></div>
+                        <div>
+                            <div class="font-bold">${escapeHtml(agent.agent_username)}</div>
+                            <div class="text-sm text-gray-500">${getLevelBadge(agent.level)} ${escapeHtml(agent.nickname) || ''}</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 邀请码区域 -->
+                    <div class="border rounded-lg p-4">
+                        <h4 class="text-sm font-semibold mb-3"><i class="fas fa-ticket-alt text-green-500 mr-1"></i>注册绑定邀请码</h4>
+                        <div class="flex items-center gap-2 mb-2">
+                            <input type="text" id="agentInviteCode" class="form-input flex-1 font-mono text-lg tracking-widest text-center" 
+                                   value="${escapeAttr(agent.invite_code || '')}" readonly 
+                                   placeholder="暂无邀请码">
+                            <button onclick="copyAgentInviteCode()" class="btn btn-secondary" title="复制邀请码">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                            <button onclick="regenerateInviteCode(${agentId})" class="btn btn-warning" title="重新生成">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                        <p class="text-xs text-gray-500">玩家使用此邀请码注册后将自动绑定到该代理名下</p>
+                    </div>
+                    
+                    <!-- 分享链接区域 -->
+                    <div class="border rounded-lg p-4">
+                        <h4 class="text-sm font-semibold mb-3"><i class="fas fa-link text-blue-500 mr-1"></i>专属分享链接</h4>
+                        <div class="flex items-center gap-2 mb-2">
+                            <input type="text" id="agentInviteUrl" class="form-input flex-1 text-sm" 
+                                   value="${escapeAttr(agent.invite_url || defaultInviteUrl)}" 
+                                   placeholder="输入完整分享链接，如: https://yourdomain.com/register?ref=${agent.invite_code || 'CODE'}">
+                            <button onclick="copyAgentInviteUrl()" class="btn btn-secondary" title="复制链接">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                        </div>
+                        <p class="text-xs text-gray-500">可自定义分享链接，支持自有域名；留空则使用默认链接</p>
+                    </div>
+                    
+                    <!-- 专属域名区域 -->
+                    <div class="border rounded-lg p-4">
+                        <h4 class="text-sm font-semibold mb-3"><i class="fas fa-globe text-orange-500 mr-1"></i>专属域名绑定</h4>
+                        <div class="flex items-center gap-2 mb-2">
+                            <input type="text" id="agentCustomDomain" class="form-input flex-1" 
+                                   value="${escapeAttr(agent.custom_domain || '')}" 
+                                   placeholder="输入专属域名，如: agent.yourdomain.com">
+                            <span id="domainStatusBadge">
+                                ${agent.custom_domain ? (agent.custom_domain_status === 1 ? 
+                                    '<span class="badge badge-success"><i class="fas fa-check mr-1"></i>已验证</span>' : 
+                                    '<span class="badge badge-warning"><i class="fas fa-clock mr-1"></i>待验证</span>') : ''}
+                            </span>
+                        </div>
+                        ${agent.custom_domain && agent.custom_domain_status !== 1 ? `
+                        <div class="bg-yellow-50 p-3 rounded text-sm mb-2">
+                            <p class="font-semibold text-yellow-700 mb-1"><i class="fas fa-info-circle mr-1"></i>域名验证说明</p>
+                            <p class="text-yellow-600">请将域名 <code class="bg-yellow-100 px-1 rounded">${escapeHtml(agent.custom_domain)}</code> 的CNAME记录指向:</p>
+                            <p class="font-mono bg-yellow-100 p-2 rounded mt-1">${window.location.hostname}</p>
+                        </div>
+                        <button onclick="verifyAgentDomain(${agentId})" class="btn btn-success text-sm">
+                            <i class="fas fa-check-circle mr-1"></i>验证域名
+                        </button>
+                        ` : ''}
+                        <p class="text-xs text-gray-500 mt-2">绑定专属域名后，该域名访问将自动关联此代理</p>
+                    </div>
+                </div>
+                
+                <div class="flex justify-end gap-3 pt-4 border-t mt-4">
+                    <button onclick="closeModal()" class="btn btn-secondary">取消</button>
+                    <button onclick="saveAgentShareSettings(${agentId})" class="btn btn-primary">
+                        <i class="fas fa-save mr-1"></i>保存设置
+                    </button>
+                </div>
+            </div>
+        `);
+    } catch (error) {
+        alert('获取代理信息失败: ' + error.message);
+    }
+}
+
+// 复制分享链接中的邀请码
+function copyAgentInviteCode() {
+    const code = document.getElementById('agentInviteCode').value;
+    if (!code) {
+        alert('暂无邀请码');
+        return;
+    }
+    navigator.clipboard.writeText(code).then(() => {
+        alert('邀请码已复制: ' + code);
+    }).catch(() => {
+        alert('复制失败，请手动复制');
+    });
+}
+
+// 复制分享链接
+function copyAgentInviteUrl() {
+    const url = document.getElementById('agentInviteUrl').value;
+    if (!url) {
+        alert('请先设置分享链接');
+        return;
+    }
+    navigator.clipboard.writeText(url).then(() => {
+        alert('分享链接已复制');
+    }).catch(() => {
+        alert('复制失败，请手动复制');
+    });
+}
+
+// 重新生成邀请码
+async function regenerateInviteCode(agentId) {
+    if (!confirm('确定要重新生成邀请码吗？原邀请码将失效！')) return;
+    
+    try {
+        const res = await apiRequest(`/agents/${agentId}/generate-invite-code`, { method: 'POST' });
+        if (res.success) {
+            document.getElementById('agentInviteCode').value = res.data.invite_code;
+            // 更新默认分享链接
+            const baseUrl = window.location.origin;
+            const urlInput = document.getElementById('agentInviteUrl');
+            if (!urlInput.value || urlInput.value.includes('ref=')) {
+                urlInput.value = `${baseUrl}/register?ref=${res.data.invite_code}`;
+            }
+            alert('邀请码已重新生成: ' + res.data.invite_code);
+        } else {
+            alert(res.message || '生成失败');
+        }
+    } catch (error) {
+        alert('生成失败: ' + error.message);
+    }
+}
+
+// 验证代理域名
+async function verifyAgentDomain(agentId) {
+    try {
+        const res = await apiRequest(`/agents/${agentId}/verify-domain`, { method: 'POST' });
+        if (res.success) {
+            document.getElementById('domainStatusBadge').innerHTML = '<span class="badge badge-success"><i class="fas fa-check mr-1"></i>已验证</span>';
+            alert('域名验证成功');
+        } else {
+            alert(res.message || '验证失败');
+        }
+    } catch (error) {
+        alert('验证失败: ' + error.message);
+    }
+}
+
+// 保存代理分享设置
+async function saveAgentShareSettings(agentId) {
+    const inviteUrl = document.getElementById('agentInviteUrl').value.trim();
+    const customDomain = document.getElementById('agentCustomDomain').value.trim();
+    
+    // 验证URL格式
+    if (inviteUrl) {
+        try {
+            new URL(inviteUrl);
+        } catch {
+            alert('分享链接格式错误，请输入完整URL');
+            return;
+        }
+    }
+    
+    // 验证域名格式
+    if (customDomain) {
+        const domainRegex = /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
+        if (!domainRegex.test(customDomain)) {
+            alert('专属域名格式错误');
+            return;
+        }
+    }
+    
+    try {
+        const res = await apiRequest(`/agents/${agentId}`, {
+            method: 'PUT',
+            body: JSON.stringify({
+                invite_url: inviteUrl || null,
+                custom_domain: customDomain || null
+            })
+        });
+        
+        if (res.success) {
+            closeModal();
+            alert('设置保存成功');
+            loadPage('agents');
+        } else {
+            alert(res.message || '保存失败');
+        }
+    } catch (error) {
+        alert('保存失败: ' + error.message);
     }
 }
 
@@ -8013,7 +8250,7 @@ async function showAddAgent(parentId = null) {
     ).join('');
     
     openModal(`
-        <div class="p-6" style="min-width: 600px;">
+        <div class="p-6" style="min-width: 650px; max-height: 90vh; overflow-y: auto;">
             <h3 class="text-lg font-bold mb-4"><i class="fas fa-user-plus text-blue-500 mr-2"></i>新增代理</h3>
             <form id="agentForm" class="space-y-4">
                 <div class="grid grid-cols-2 gap-4">
@@ -8069,6 +8306,15 @@ async function showAddAgent(parentId = null) {
                             <input type="number" id="agentCommissionRatio" class="form-input w-full" value="0" min="0" max="100" step="0.1">
                             <span class="text-xs text-gray-400">从下级有效投注中获取的比例</span>
                         </div>
+                    </div>
+                </div>
+                <!-- 专属域名绑定 -->
+                <div class="border rounded-lg p-4 bg-orange-50">
+                    <h4 class="text-sm font-semibold mb-3"><i class="fas fa-globe text-orange-500 mr-1"></i>专属域名绑定</h4>
+                    <div>
+                        <label class="block text-xs text-gray-600 mb-1">专属域名 (可选)</label>
+                        <input type="text" id="agentCustomDomain" class="form-input w-full" placeholder="如: agent.yourdomain.com">
+                        <span class="text-xs text-gray-400">绑定专属域名后，该域名访问将自动关联此代理；邀请码将在创建后自动生成</span>
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-4">
@@ -8133,7 +8379,8 @@ async function submitAgent(agentId = null) {
         commission_ratio: parseFloat(document.getElementById('agentCommissionRatio').value) || 0,
         contact_phone: document.getElementById('agentPhone').value.trim() || null,
         currency: document.getElementById('agentCurrency').value,
-        remark: document.getElementById('agentRemark').value.trim() || null
+        remark: document.getElementById('agentRemark').value.trim() || null,
+        custom_domain: document.getElementById('agentCustomDomain')?.value.trim() || null
     };
     
     if (!data.agent_username || data.agent_username.length < 2) {
@@ -8143,6 +8390,15 @@ async function submitAgent(agentId = null) {
     if (!agentId && (!data.password || data.password.length < 6)) {
         alert('请设置至少6位的密码');
         return;
+    }
+    
+    // 验证专属域名格式
+    if (data.custom_domain) {
+        const domainRegex = /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
+        if (!domainRegex.test(data.custom_domain)) {
+            alert('专属域名格式错误');
+            return;
+        }
     }
     
     try {
@@ -8155,7 +8411,11 @@ async function submitAgent(agentId = null) {
         const res = await apiRequest(url, { method, body: JSON.stringify(data) });
         if (res.success) {
             closeModal();
-            alert(agentId ? '代理信息更新成功' : '代理创建成功');
+            let msg = agentId ? '代理信息更新成功' : '代理创建成功';
+            if (!agentId && res.data?.invite_code) {
+                msg += `\n邀请码: ${res.data.invite_code}`;
+            }
+            alert(msg);
             loadPage('agents');
         } else {
             alert(res.message || '操作失败');
@@ -8195,10 +8455,25 @@ async function editAgent(agentId) {
             document.getElementById('agentPhone').value = agent.contact_phone || '';
             document.getElementById('agentCurrency').value = agent.currency || 'CNY';
             document.getElementById('agentRemark').value = agent.remark || '';
+            // 专属域名
+            if (document.getElementById('agentCustomDomain')) {
+                document.getElementById('agentCustomDomain').value = agent.custom_domain || '';
+            }
             
             // 更改提交处理
             document.getElementById('agentForm').onsubmit = async (e) => {
                 e.preventDefault();
+                const customDomain = document.getElementById('agentCustomDomain')?.value.trim() || null;
+                
+                // 验证专属域名格式
+                if (customDomain) {
+                    const domainRegex = /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
+                    if (!domainRegex.test(customDomain)) {
+                        alert('专属域名格式错误');
+                        return;
+                    }
+                }
+                
                 const editData = {
                     nickname: document.getElementById('agentNickname').value.trim() || null,
                     parent_agent_id: document.getElementById('agentParent').value ? parseInt(document.getElementById('agentParent').value) : null,
@@ -8206,7 +8481,8 @@ async function editAgent(agentId) {
                     share_ratio: parseFloat(document.getElementById('agentShareRatio').value) || 0,
                     commission_ratio: parseFloat(document.getElementById('agentCommissionRatio').value) || 0,
                     contact_phone: document.getElementById('agentPhone').value.trim() || null,
-                    remark: document.getElementById('agentRemark').value.trim() || null
+                    remark: document.getElementById('agentRemark').value.trim() || null,
+                    custom_domain: customDomain
                 };
                 // 如果输入了新密码
                 const newPassword = document.getElementById('agentPassword').value;
@@ -8242,9 +8518,11 @@ async function viewAgentDetail(agentId) {
         }
         const agent = res.data;
         const subAgents = agent.sub_agents || [];
+        const baseUrl = window.location.origin;
+        const defaultInviteUrl = agent.invite_code ? `${baseUrl}/register?ref=${agent.invite_code}` : '';
         
         openModal(`
-            <div class="p-6" style="min-width: 600px;">
+            <div class="p-6" style="min-width: 650px; max-height: 90vh; overflow-y: auto;">
                 <h3 class="text-lg font-bold mb-4"><i class="fas fa-user-tie text-blue-500 mr-2"></i>代理详情</h3>
                 <div class="space-y-4">
                     <div class="grid grid-cols-2 gap-4">
@@ -8297,6 +8575,33 @@ async function viewAgentDetail(agentId) {
                             <div class="font-bold text-sm">${agent.created_at || '-'}</div>
                         </div>
                     </div>
+                    
+                    <!-- 分享与域名信息 -->
+                    <div class="border rounded-lg p-4 bg-purple-50">
+                        <h4 class="text-sm font-semibold mb-3"><i class="fas fa-share-alt text-purple-500 mr-1"></i>分享与域名信息</h4>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <span class="text-gray-500 text-xs">邀请码</span>
+                                <div class="font-mono font-bold text-lg">${agent.invite_code || '<span class="text-gray-400">未生成</span>'}</div>
+                            </div>
+                            <div>
+                                <span class="text-gray-500 text-xs">专属域名</span>
+                                <div class="font-bold">
+                                    ${agent.custom_domain ? `
+                                        ${escapeHtml(agent.custom_domain)}
+                                        ${agent.custom_domain_status === 1 ? 
+                                            '<span class="badge badge-success ml-1 text-xs">已验证</span>' : 
+                                            '<span class="badge badge-warning ml-1 text-xs">待验证</span>'}
+                                    ` : '<span class="text-gray-400">未设置</span>'}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <span class="text-gray-500 text-xs">分享链接</span>
+                            <div class="text-sm break-all text-blue-600">${escapeHtml(agent.invite_url || defaultInviteUrl) || '<span class="text-gray-400">未设置</span>'}</div>
+                        </div>
+                    </div>
+                    
                     ${subAgents.length > 0 ? `
                     <div class="border-t pt-4">
                         <h4 class="text-sm font-semibold mb-2">直属下级代理</h4>
@@ -8317,7 +8622,10 @@ async function viewAgentDetail(agentId) {
                     </div>
                     ` : ''}
                 </div>
-                <div class="flex justify-end pt-4 border-t mt-4">
+                <div class="flex justify-end gap-2 pt-4 border-t mt-4">
+                    <button onclick="closeModal(); showAgentShareSettings(${agentId})" class="btn btn-primary">
+                        <i class="fas fa-share-alt mr-1"></i>分享设置
+                    </button>
                     <button onclick="closeModal()" class="btn btn-secondary">关闭</button>
                 </div>
             </div>
@@ -9349,3 +9657,6 @@ async function deleteTable(tableId, code) {
         else { alert(res.message || '删除失败'); }
     } catch (error) { alert('删除失败: ' + error.message); }
 }
+
+
+// Version: 20251130-032230 - Agent Share & Domain Features Added
