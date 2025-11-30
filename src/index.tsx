@@ -2761,19 +2761,45 @@ app.get('/api/v1/commission/schemes', async (c) => {
 
 // 创建洗码方案
 app.post('/api/v1/commission/schemes', async (c) => {
-  const { scheme_name, settlement_cycle, min_valid_bet, daily_max_amount, baccarat_rate, dragon_tiger_rate, roulette_rate, sicbo_rate, niuniu_rate } = await c.req.json()
+  const { 
+    scheme_name, settlement_cycle, min_valid_bet, daily_max_amount, 
+    baccarat_rate, dragon_tiger_rate, roulette_rate, sicbo_rate, niuniu_rate,
+    auto_send, send_type, max_claims_per_cycle, vip_levels, applicable_agents, description, status
+  } = await c.req.json()
 
   try {
     const result = await c.env.DB.prepare(`
-      INSERT INTO commission_schemes (scheme_name, settlement_cycle, min_valid_bet, daily_max_amount, baccarat_rate, dragon_tiger_rate, roulette_rate, sicbo_rate, niuniu_rate)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(scheme_name, settlement_cycle || 1, min_valid_bet || 0, daily_max_amount || null, baccarat_rate || 0.008, dragon_tiger_rate || 0.008, roulette_rate || 0.005, sicbo_rate || 0.005, niuniu_rate || 0.007).run()
+      INSERT INTO commission_schemes (
+        scheme_name, settlement_cycle, min_valid_bet, daily_max_amount, 
+        baccarat_rate, dragon_tiger_rate, roulette_rate, sicbo_rate, niuniu_rate,
+        auto_send, send_type, max_claims_per_cycle, vip_levels, applicable_agents, description, status
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      scheme_name, 
+      settlement_cycle || 1, 
+      min_valid_bet || 0, 
+      daily_max_amount || null, 
+      baccarat_rate || 0.008, 
+      dragon_tiger_rate || 0.008, 
+      roulette_rate || 0.005, 
+      sicbo_rate || 0.005, 
+      niuniu_rate || 0.007,
+      auto_send || 0,
+      send_type || 2, // 默认手动领取
+      max_claims_per_cycle || 1,
+      vip_levels ? JSON.stringify(vip_levels) : null,
+      applicable_agents ? JSON.stringify(applicable_agents) : null,
+      description || null,
+      status !== undefined ? status : 1
+    ).run()
 
     return c.json({ success: true, data: { scheme_id: result.meta.last_row_id } })
   } catch (error: any) {
     if (error.message?.includes('UNIQUE')) {
       return c.json({ success: false, message: '方案名称已存在' }, 400)
     }
+    console.error('Create commission scheme error:', error)
     return c.json({ success: false, message: '创建失败' }, 500)
   }
 })
@@ -2804,7 +2830,11 @@ app.get('/api/v1/commission/schemes/:scheme_id', async (c) => {
 // 更新洗码方案
 app.put('/api/v1/commission/schemes/:scheme_id', async (c) => {
   const scheme_id = c.req.param('scheme_id')
-  const { scheme_name, settlement_cycle, min_valid_bet, daily_max_amount, baccarat_rate, dragon_tiger_rate, roulette_rate, sicbo_rate, niuniu_rate, status } = await c.req.json()
+  const { 
+    scheme_name, settlement_cycle, min_valid_bet, daily_max_amount, 
+    baccarat_rate, dragon_tiger_rate, roulette_rate, sicbo_rate, niuniu_rate, status,
+    auto_send, send_type, max_claims_per_cycle, vip_levels, applicable_agents, description
+  } = await c.req.json()
 
   try {
     await c.env.DB.prepare(`
@@ -2819,12 +2849,27 @@ app.put('/api/v1/commission/schemes/:scheme_id', async (c) => {
         sicbo_rate = COALESCE(?, sicbo_rate),
         niuniu_rate = COALESCE(?, niuniu_rate),
         status = COALESCE(?, status),
+        auto_send = COALESCE(?, auto_send),
+        send_type = COALESCE(?, send_type),
+        max_claims_per_cycle = COALESCE(?, max_claims_per_cycle),
+        vip_levels = ?,
+        applicable_agents = ?,
+        description = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE scheme_id = ?
-    `).bind(scheme_name, settlement_cycle, min_valid_bet, daily_max_amount, baccarat_rate, dragon_tiger_rate, roulette_rate, sicbo_rate, niuniu_rate, status, scheme_id).run()
+    `).bind(
+      scheme_name, settlement_cycle, min_valid_bet, daily_max_amount, 
+      baccarat_rate, dragon_tiger_rate, roulette_rate, sicbo_rate, niuniu_rate, status,
+      auto_send, send_type, max_claims_per_cycle,
+      vip_levels !== undefined ? (vip_levels ? JSON.stringify(vip_levels) : null) : undefined,
+      applicable_agents !== undefined ? (applicable_agents ? JSON.stringify(applicable_agents) : null) : undefined,
+      description,
+      scheme_id
+    ).run()
 
     return c.json({ success: true, message: '更新成功' })
   } catch (error) {
+    console.error('Update commission scheme error:', error)
     return c.json({ success: false, message: '更新失败' }, 500)
   }
 })
@@ -2987,6 +3032,254 @@ app.post('/api/v1/commission/records/batch-audit', async (c) => {
     return c.json({ success: true, message: '批量审核完成' })
   } catch (error) {
     return c.json({ success: false, message: '批量审核失败' }, 500)
+  }
+})
+
+// 获取用户待领取的洗码
+app.get('/api/v1/commission/pending/:user_id', async (c) => {
+  const user_id = c.req.param('user_id')
+
+  try {
+    // 获取待领取的洗码记录
+    const records = await c.env.DB.prepare(`
+      SELECT cr.*, cs.scheme_name, cs.send_type
+      FROM commission_records cr
+      LEFT JOIN commission_schemes cs ON cr.scheme_id = cs.scheme_id
+      WHERE cr.user_id = ? 
+        AND cr.claim_status = 0 
+        AND cr.audit_status = 1
+        AND (cr.expires_at IS NULL OR cr.expires_at > CURRENT_TIMESTAMP)
+      ORDER BY cr.created_at DESC
+    `).bind(user_id).all()
+
+    // 计算汇总
+    const summary = await c.env.DB.prepare(`
+      SELECT 
+        COUNT(*) as pending_count,
+        COALESCE(SUM(commission_amount), 0) as total_pending
+      FROM commission_records
+      WHERE user_id = ? 
+        AND claim_status = 0 
+        AND audit_status = 1
+        AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+    `).bind(user_id).first()
+
+    return c.json({
+      success: true,
+      data: {
+        records: records.results || [],
+        summary: {
+          pending_count: summary?.pending_count || 0,
+          total_pending: summary?.total_pending || 0
+        }
+      }
+    })
+  } catch (error) {
+    console.error('Get pending commission error:', error)
+    return c.json({ success: false, message: '获取待领取洗码失败' }, 500)
+  }
+})
+
+// 用户领取洗码
+app.post('/api/v1/commission/claim', async (c) => {
+  const { user_id, record_ids } = await c.req.json()
+
+  if (!user_id) {
+    return c.json({ success: false, message: '缺少用户ID' }, 400)
+  }
+
+  try {
+    // 如果指定了记录ID，领取指定的；否则领取全部待领取的
+    let whereClause = 'user_id = ? AND claim_status = 0 AND audit_status = 1'
+    let params: any[] = [user_id]
+    
+    if (record_ids && Array.isArray(record_ids) && record_ids.length > 0) {
+      whereClause += ` AND record_id IN (${record_ids.map(() => '?').join(',')})`
+      params = params.concat(record_ids)
+    }
+
+    // 检查是否有符合条件的洗码可领取（只获取手动领取类型的）
+    const pendingRecords = await c.env.DB.prepare(`
+      SELECT cr.*, cs.send_type
+      FROM commission_records cr
+      LEFT JOIN commission_schemes cs ON cr.scheme_id = cs.scheme_id
+      WHERE ${whereClause}
+        AND (cr.expires_at IS NULL OR cr.expires_at > CURRENT_TIMESTAMP)
+    `).bind(...params).all()
+
+    if (!pendingRecords.results || pendingRecords.results.length === 0) {
+      return c.json({ success: false, message: '没有可领取的洗码' }, 400)
+    }
+
+    // 计算总领取金额
+    const totalAmount = pendingRecords.results.reduce((sum: number, r: any) => sum + parseFloat(r.commission_amount || 0), 0)
+
+    // 获取用户当前余额
+    const user = await c.env.DB.prepare('SELECT balance FROM users WHERE user_id = ?').bind(user_id).first()
+    if (!user) {
+      return c.json({ success: false, message: '用户不存在' }, 404)
+    }
+    const currentBalance = parseFloat((user as any).balance) || 0
+    const newBalance = currentBalance + totalAmount
+
+    // 批量更新领取状态
+    const recordIdList = pendingRecords.results.map((r: any) => r.record_id)
+    await c.env.DB.prepare(`
+      UPDATE commission_records 
+      SET claim_status = 1, claimed_at = CURRENT_TIMESTAMP 
+      WHERE record_id IN (${recordIdList.map(() => '?').join(',')})
+    `).bind(...recordIdList).run()
+
+    // 更新用户余额
+    await c.env.DB.prepare('UPDATE users SET balance = ? WHERE user_id = ?').bind(newBalance, user_id).run()
+
+    // 创建交易记录
+    const orderNo = `CLM${Date.now()}${Math.random().toString(36).substr(2, 6).toUpperCase()}`
+    await c.env.DB.prepare(`
+      INSERT INTO transactions (order_no, user_id, transaction_type, amount, balance_before, balance_after, audit_status, remark)
+      VALUES (?, ?, 6, ?, ?, ?, 1, ?)
+    `).bind(orderNo, user_id, totalAmount, currentBalance, newBalance, `洗码领取(${recordIdList.length}笔)`).run()
+
+    return c.json({
+      success: true,
+      message: `成功领取 ${recordIdList.length} 笔洗码，共 ¥${totalAmount.toFixed(2)}`,
+      data: {
+        claimed_count: recordIdList.length,
+        claimed_amount: totalAmount,
+        new_balance: newBalance
+      }
+    })
+  } catch (error) {
+    console.error('Claim commission error:', error)
+    return c.json({ success: false, message: '领取失败' }, 500)
+  }
+})
+
+// 计算并生成洗码记录（由系统定时调用或手动触发）
+app.post('/api/v1/commission/calculate', async (c) => {
+  const { user_id, start_date, end_date } = await c.req.json()
+
+  try {
+    // 获取用户及其洗码方案
+    let userQuery = `
+      SELECT u.user_id, u.username, u.commission_scheme_id, u.vip_level, u.agent_id,
+             cs.scheme_id, cs.scheme_name, cs.settlement_cycle, cs.min_valid_bet, cs.daily_max_amount,
+             cs.baccarat_rate, cs.dragon_tiger_rate, cs.roulette_rate, cs.sicbo_rate, cs.niuniu_rate,
+             cs.auto_send, cs.send_type
+      FROM users u
+      JOIN commission_schemes cs ON u.commission_scheme_id = cs.scheme_id
+      WHERE cs.status = 1 AND cs.auto_send = 1
+    `
+    const userParams: any[] = []
+    
+    if (user_id) {
+      userQuery += ' AND u.user_id = ?'
+      userParams.push(user_id)
+    }
+
+    const users = await c.env.DB.prepare(userQuery).bind(...userParams).all()
+    
+    if (!users.results || users.results.length === 0) {
+      return c.json({ success: true, message: '没有符合条件的用户', data: { processed: 0 } })
+    }
+
+    let processedCount = 0
+    const today = new Date().toISOString().split('T')[0]
+    const calcStartDate = start_date || today
+    const calcEndDate = end_date || today
+
+    for (const user of users.results as any[]) {
+      // 获取用户在指定日期范围内的有效投注
+      const bets = await c.env.DB.prepare(`
+        SELECT game_type, SUM(valid_bet_amount) as total_valid_bet
+        FROM bets
+        WHERE user_id = ? AND status = 1
+          AND DATE(bet_time) >= ? AND DATE(bet_time) <= ?
+        GROUP BY game_type
+      `).bind(user.user_id, calcStartDate, calcEndDate).all()
+
+      if (!bets.results || bets.results.length === 0) continue
+
+      // 检查是否已经计算过
+      const existing = await c.env.DB.prepare(`
+        SELECT COUNT(*) as count FROM commission_records
+        WHERE user_id = ? AND settlement_date = ?
+      `).bind(user.user_id, calcEndDate).first()
+
+      if ((existing as any)?.count > 0) continue
+
+      // 计算各游戏类型的洗码金额
+      let totalCommission = 0
+      for (const bet of bets.results as any[]) {
+        let rate = 0
+        switch (bet.game_type?.toLowerCase()) {
+          case 'baccarat': case '百家乐': rate = user.baccarat_rate || 0; break
+          case 'dragon_tiger': case '龙虎': rate = user.dragon_tiger_rate || 0; break
+          case 'roulette': case '轮盘': rate = user.roulette_rate || 0; break
+          case 'sicbo': case '骰宝': rate = user.sicbo_rate || 0; break
+          case 'niuniu': case '牛牛': rate = user.niuniu_rate || 0; break
+          default: rate = 0.005
+        }
+        
+        const validBet = parseFloat(bet.total_valid_bet) || 0
+        if (validBet >= (user.min_valid_bet || 0)) {
+          totalCommission += validBet * rate
+        }
+      }
+
+      // 应用单日上限
+      if (user.daily_max_amount && totalCommission > user.daily_max_amount) {
+        totalCommission = user.daily_max_amount
+      }
+
+      if (totalCommission <= 0) continue
+
+      // 根据send_type设置领取状态
+      const claimStatus = user.send_type === 1 ? 3 : 0 // 1=自动到账(设为已到账), 2=手动领取(设为待领取)
+      
+      // 计算过期时间（7天后）
+      const expiresAt = new Date()
+      expiresAt.setDate(expiresAt.getDate() + 7)
+
+      // 创建洗码记录
+      await c.env.DB.prepare(`
+        INSERT INTO commission_records (user_id, scheme_id, game_type, valid_bet_amount, commission_rate, commission_amount, settlement_date, audit_status, claim_status, expires_at)
+        VALUES (?, ?, 'mixed', ?, 0, ?, ?, 1, ?, ?)
+      `).bind(
+        user.user_id, 
+        user.scheme_id, 
+        bets.results.reduce((sum: number, b: any) => sum + parseFloat(b.total_valid_bet || 0), 0),
+        totalCommission,
+        calcEndDate,
+        claimStatus,
+        user.send_type === 2 ? expiresAt.toISOString() : null
+      ).run()
+
+      // 如果是自动到账，直接加到用户余额
+      if (user.send_type === 1) {
+        await c.env.DB.prepare('UPDATE users SET balance = balance + ? WHERE user_id = ?')
+          .bind(totalCommission, user.user_id).run()
+        
+        // 创建交易记录
+        const orderNo = `AUT${Date.now()}${Math.random().toString(36).substr(2, 6).toUpperCase()}`
+        const currentUser = await c.env.DB.prepare('SELECT balance FROM users WHERE user_id = ?').bind(user.user_id).first()
+        await c.env.DB.prepare(`
+          INSERT INTO transactions (order_no, user_id, transaction_type, amount, balance_before, balance_after, audit_status, remark)
+          VALUES (?, ?, 6, ?, ?, ?, 1, '洗码自动到账')
+        `).bind(orderNo, user.user_id, totalCommission, (currentUser?.balance as number) - totalCommission, currentUser?.balance).run()
+      }
+
+      processedCount++
+    }
+
+    return c.json({
+      success: true,
+      message: `洗码计算完成，处理了 ${processedCount} 个用户`,
+      data: { processed: processedCount }
+    })
+  } catch (error) {
+    console.error('Calculate commission error:', error)
+    return c.json({ success: false, message: '洗码计算失败' }, 500)
   }
 })
 

@@ -1154,66 +1154,123 @@ async function renderAgents() {
     const content = document.getElementById('pageContent');
     
     try {
-        const res = await apiRequest('/agents');
-        const { list, total } = res.data;
+        const [agentsRes, schemesRes] = await Promise.all([
+            apiRequest('/agents'),
+            apiRequest('/commission/schemes')
+        ]);
+        const { list, total } = agentsRes.data;
+        window._commissionSchemes = schemesRes.data || [];
+        window._agentsList = list || [];
+        
+        // 统计数据
+        const activeCount = list.filter(a => a.status === 1).length;
+        const shareholderCount = list.filter(a => a.level === 1).length;
+        const agentCount = list.filter(a => a.level === 2).length;
+        const subAgentCount = list.filter(a => a.level === 3).length;
         
         content.innerHTML = `
-            <div class="card">
-                <div class="card-header flex items-center justify-between">
-                    <span>代理列表</span>
-                    <button class="btn btn-primary text-sm">
-                        <i class="fas fa-plus mr-1"></i>新增代理
-                    </button>
+            <div class="space-y-4">
+                <!-- 统计卡片 -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="bg-white rounded-lg p-4 shadow">
+                        <div class="flex items-center">
+                            <div class="p-3 rounded-full bg-blue-100 text-blue-600"><i class="fas fa-users"></i></div>
+                            <div class="ml-3">
+                                <div class="text-sm text-gray-500">总代理数</div>
+                                <div class="text-xl font-bold">${total || list.length}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-lg p-4 shadow">
+                        <div class="flex items-center">
+                            <div class="p-3 rounded-full bg-green-100 text-green-600"><i class="fas fa-check-circle"></i></div>
+                            <div class="ml-3">
+                                <div class="text-sm text-gray-500">启用代理</div>
+                                <div class="text-xl font-bold text-green-600">${activeCount}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-lg p-4 shadow">
+                        <div class="flex items-center">
+                            <div class="p-3 rounded-full bg-purple-100 text-purple-600"><i class="fas fa-building"></i></div>
+                            <div class="ml-3">
+                                <div class="text-sm text-gray-500">股东</div>
+                                <div class="text-xl font-bold text-purple-600">${shareholderCount}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-lg p-4 shadow">
+                        <div class="flex items-center">
+                            <div class="p-3 rounded-full bg-orange-100 text-orange-600"><i class="fas fa-user-tie"></i></div>
+                            <div class="ml-3">
+                                <div class="text-sm text-gray-500">总代 / 代理</div>
+                                <div class="text-xl font-bold text-orange-600">${agentCount} / ${subAgentCount}</div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div class="card-body">
-                    <div class="overflow-x-auto">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>称</th>
-                                    <th>层级</th>
-                                    <th>上级</th>
-                                    <th>余额</th>
-                                    <th>占成</th>
-                                    <th>佣金</th>
-                                    <th>下级代理</th>
-                                    <th>玩家数</th>
-                                    <th>状态</th>
-                                    <th>操作</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${list.map(agent => `
+                
+                <!-- 代理列表 -->
+                <div class="card">
+                    <div class="card-header flex items-center justify-between">
+                        <span>代理列表 <span class="badge badge-primary ml-2">${list.length}</span></span>
+                        <button onclick="showAddAgent()" class="btn btn-primary text-sm">
+                            <i class="fas fa-plus mr-1"></i>新增代理
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div class="overflow-x-auto">
+                            <table class="data-table">
+                                <thead>
                                     <tr>
-                                        <td class="font-medium">${agent.agent_username}</td>
-                                        <td>${getLevelBadge(agent.level)}</td>
-                                        <td>${agent.parent_username || '-'}</td>
-                                        <td class="text-green-600">¥ ${formatNumber(agent.balance)}</td>
-                                        <td>${agent.share_ratio}%</td>
-                                        <td>${agent.commission_ratio}%</td>
-                                        <td>${agent.sub_agent_count || 0}</td>
-                                        <td>${agent.player_count || 0}</td>
-                                        <td>${getStatusBadge(agent.status)}</td>
-                                        <td>
-                                            <div class="flex space-x-2">
-                                                <button class="text-blue-500 hover:text-blue-700" title="编辑">
-                                                    <i class="fas fa-edit"></i>
-                                                </button>
-                                                <button class="text-green-500 hover:text-green-700" title="下级">
-                                                    <i class="fas fa-users"></i>
-                                                </button>
-                                            </div>
-                                        </td>
+                                        <th>账号</th>
+                                        <th>昵称</th>
+                                        <th>层级</th>
+                                        <th>上级</th>
+                                        <th>余额</th>
+                                        <th>占成</th>
+                                        <th>佣金</th>
+                                        <th>下级/玩家</th>
+                                        <th>状态</th>
+                                        <th>操作</th>
                                     </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody>
+                                    ${list.map(agent => `
+                                        <tr>
+                                            <td class="font-medium">${escapeHtml(agent.agent_username)}</td>
+                                            <td>${escapeHtml(agent.nickname) || '-'}</td>
+                                            <td>${getLevelBadge(agent.level)}</td>
+                                            <td>${escapeHtml(agent.parent_username) || '-'}</td>
+                                            <td class="text-green-600">¥ ${formatNumber(agent.balance)}</td>
+                                            <td><span class="badge badge-purple">${agent.share_ratio}%</span></td>
+                                            <td><span class="badge badge-info">${agent.commission_ratio}%</span></td>
+                                            <td>${agent.sub_agent_count || 0} / ${agent.player_count || 0}</td>
+                                            <td>${getStatusBadge(agent.status)}</td>
+                                            <td>
+                                                <div class="flex space-x-2">
+                                                    <button onclick="editAgent(${agent.agent_id})" class="text-blue-500 hover:text-blue-700" title="编辑">
+                                                        <i class="fas fa-edit"></i>
+                                                    </button>
+                                                    <button onclick="viewAgentDetail(${agent.agent_id})" class="text-green-500 hover:text-green-700" title="详情">
+                                                        <i class="fas fa-eye"></i>
+                                                    </button>
+                                                    <button onclick="toggleAgentStatus(${agent.agent_id}, ${agent.status})" class="text-${agent.status === 1 ? 'orange' : 'green'}-500 hover:text-${agent.status === 1 ? 'orange' : 'green'}-700" title="${agent.status === 1 ? '禁用' : '启用'}">
+                                                        <i class="fas fa-${agent.status === 1 ? 'ban' : 'check'}"></i>
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
         `;
     } catch (error) {
-        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -3184,60 +3241,117 @@ async function renderCommissionSchemes() {
         const res = await apiRequest('/commission/schemes');
         const list = res.data || [];
         
+        // 统计
+        const activeCount = list.filter(s => s.status === 1).length;
+        const autoSendCount = list.filter(s => s.auto_send === 1).length;
+        const manualClaimCount = list.filter(s => s.auto_send === 1 && s.send_type === 2).length;
+        
         content.innerHTML = `
-            <div class="card">
-                <div class="card-header flex items-center justify-between">
-                    <span>洗码方案配置 <span class="badge badge-primary">${list.length}</span></span>
-                    <button onclick="showAddCommissionScheme()" class="btn btn-primary text-sm"><i class="fas fa-plus mr-1"></i>新增方案</button>
-                </div>
-                <div class="card-body">
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        ${list.map(scheme => `
-                            <div class="border rounded-lg p-4 hover:shadow-lg transition">
-                                <div class="flex items-center justify-between mb-3">
-                                    <h3 class="font-bold text-lg">${escapeHtml(scheme.scheme_name)}</h3>
-                                    ${scheme.status === 1 ? '<span class="badge badge-success">启用</span>' : '<span class="badge badge-danger">禁用</span>'}
-                                </div>
-                                <div class="space-y-2 text-sm">
-                                    <div class="flex justify-between">
-                                        <span class="text-gray-500">结算周期:</span>
-                                        <span>${scheme.settlement_cycle === 1 ? '日结' : scheme.settlement_cycle === 2 ? '周结' : '实时'}</span>
-                                    </div>
-                                    <div class="flex justify-between">
-                                        <span class="text-gray-500">最低投注:</span>
-                                        <span>¥ ${formatNumber(scheme.min_valid_bet)}</span>
-                                    </div>
-                                    <div class="flex justify-between">
-                                        <span class="text-gray-500">单日上限:</span>
-                                        <span>¥ ${scheme.daily_max_amount ? formatNumber(scheme.daily_max_amount) : '无限制'}</span>
-                                    </div>
-                                    <hr class="my-2">
-                                    <div class="text-gray-500 mb-2">返水比例:</div>
-                                    <div class="grid grid-cols-2 gap-2">
-                                        <div class="bg-gray-50 p-2 rounded">
-                                            <span class="text-xs text-gray-500">百家乐</span>
-                                            <div class="font-bold text-blue-600">${(scheme.baccarat_rate * 100).toFixed(2)}%</div>
-                                        </div>
-                                        <div class="bg-gray-50 p-2 rounded">
-                                            <span class="text-xs text-gray-500">龙虎</span>
-                                            <div class="font-bold text-blue-600">${(scheme.dragon_tiger_rate * 100).toFixed(2)}%</div>
-                                        </div>
-                                        <div class="bg-gray-50 p-2 rounded">
-                                            <span class="text-xs text-gray-500">轮盘</span>
-                                            <div class="font-bold text-blue-600">${(scheme.roulette_rate * 100).toFixed(2)}%</div>
-                                        </div>
-                                        <div class="bg-gray-50 p-2 rounded">
-                                            <span class="text-xs text-gray-500">牛牛</span>
-                                            <div class="font-bold text-blue-600">${(scheme.niuniu_rate * 100).toFixed(2)}%</div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="mt-4 flex space-x-2">
-                                    <button onclick="editCommissionScheme(${scheme.scheme_id})" class="btn btn-outline text-sm flex-1"><i class="fas fa-edit mr-1"></i>编辑</button>
-                                    <button onclick="deleteCommissionScheme(${scheme.scheme_id}, '${escapeAttr(scheme.scheme_name)}')" class="btn btn-danger text-sm"><i class="fas fa-trash"></i></button>
-                                </div>
+            <div class="space-y-4">
+                <!-- 统计卡片 -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="bg-white rounded-lg p-4 shadow">
+                        <div class="flex items-center">
+                            <div class="p-3 rounded-full bg-blue-100 text-blue-600"><i class="fas fa-layer-group"></i></div>
+                            <div class="ml-3">
+                                <div class="text-sm text-gray-500">总方案数</div>
+                                <div class="text-xl font-bold">${list.length}</div>
                             </div>
-                        `).join('')}
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-lg p-4 shadow">
+                        <div class="flex items-center">
+                            <div class="p-3 rounded-full bg-green-100 text-green-600"><i class="fas fa-check-circle"></i></div>
+                            <div class="ml-3">
+                                <div class="text-sm text-gray-500">启用中</div>
+                                <div class="text-xl font-bold text-green-600">${activeCount}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-lg p-4 shadow">
+                        <div class="flex items-center">
+                            <div class="p-3 rounded-full bg-purple-100 text-purple-600"><i class="fas fa-magic"></i></div>
+                            <div class="ml-3">
+                                <div class="text-sm text-gray-500">自动派发</div>
+                                <div class="text-xl font-bold text-purple-600">${autoSendCount}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-lg p-4 shadow">
+                        <div class="flex items-center">
+                            <div class="p-3 rounded-full bg-orange-100 text-orange-600"><i class="fas fa-hand-pointer"></i></div>
+                            <div class="ml-3">
+                                <div class="text-sm text-gray-500">手动领取</div>
+                                <div class="text-xl font-bold text-orange-600">${manualClaimCount}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 方案列表 -->
+                <div class="card">
+                    <div class="card-header flex items-center justify-between">
+                        <span>洗码方案配置 <span class="badge badge-primary">${list.length}</span></span>
+                        <button onclick="showAddCommissionScheme()" class="btn btn-primary text-sm"><i class="fas fa-plus mr-1"></i>新增方案</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            ${list.map(scheme => `
+                                <div class="border rounded-lg p-4 hover:shadow-lg transition ${scheme.auto_send === 1 ? 'border-purple-300 bg-purple-50' : ''}">
+                                    <div class="flex items-center justify-between mb-3">
+                                        <h3 class="font-bold text-lg">${escapeHtml(scheme.scheme_name)}</h3>
+                                        <div class="flex space-x-1">
+                                            ${scheme.auto_send === 1 ? `<span class="badge ${scheme.send_type === 2 ? 'badge-warning' : 'badge-info'}"><i class="fas fa-${scheme.send_type === 2 ? 'hand-pointer' : 'bolt'} mr-1"></i>${scheme.send_type === 2 ? '手动领取' : '自动到账'}</span>` : ''}
+                                            ${scheme.status === 1 ? '<span class="badge badge-success">启用</span>' : '<span class="badge badge-danger">禁用</span>'}
+                                        </div>
+                                    </div>
+                                    <div class="space-y-2 text-sm">
+                                        <div class="flex justify-between">
+                                            <span class="text-gray-500">结算周期:</span>
+                                            <span>${scheme.settlement_cycle === 0 ? '实时' : scheme.settlement_cycle === 1 ? '日结' : scheme.settlement_cycle === 2 ? '周结' : '月结'}</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span class="text-gray-500">最低投注:</span>
+                                            <span>¥ ${formatNumber(scheme.min_valid_bet)}</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span class="text-gray-500">单日上限:</span>
+                                            <span>¥ ${scheme.daily_max_amount ? formatNumber(scheme.daily_max_amount) : '无限制'}</span>
+                                        </div>
+                                        ${scheme.auto_send === 1 ? `
+                                        <div class="flex justify-between">
+                                            <span class="text-gray-500">派发方式:</span>
+                                            <span class="font-medium ${scheme.send_type === 2 ? 'text-orange-600' : 'text-blue-600'}">${scheme.send_type === 2 ? '用户手动领取' : '自动到账'}</span>
+                                        </div>
+                                        ` : ''}
+                                        <hr class="my-2">
+                                        <div class="text-gray-500 mb-2">返水比例:</div>
+                                        <div class="grid grid-cols-2 gap-2">
+                                            <div class="bg-white p-2 rounded border">
+                                                <span class="text-xs text-gray-500">百家乐</span>
+                                                <div class="font-bold text-blue-600">${((scheme.baccarat_rate || 0) * 100).toFixed(2)}%</div>
+                                            </div>
+                                            <div class="bg-white p-2 rounded border">
+                                                <span class="text-xs text-gray-500">龙虎</span>
+                                                <div class="font-bold text-blue-600">${((scheme.dragon_tiger_rate || 0) * 100).toFixed(2)}%</div>
+                                            </div>
+                                            <div class="bg-white p-2 rounded border">
+                                                <span class="text-xs text-gray-500">轮盘</span>
+                                                <div class="font-bold text-blue-600">${((scheme.roulette_rate || 0) * 100).toFixed(2)}%</div>
+                                            </div>
+                                            <div class="bg-white p-2 rounded border">
+                                                <span class="text-xs text-gray-500">牛牛</span>
+                                                <div class="font-bold text-blue-600">${((scheme.niuniu_rate || 0) * 100).toFixed(2)}%</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="mt-4 flex space-x-2">
+                                        <button onclick="editCommissionScheme(${scheme.scheme_id})" class="btn btn-outline text-sm flex-1"><i class="fas fa-edit mr-1"></i>编辑</button>
+                                        <button onclick="deleteCommissionScheme(${scheme.scheme_id}, '${escapeAttr(scheme.scheme_name)}')" class="btn btn-danger text-sm"><i class="fas fa-trash"></i></button>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -3252,64 +3366,166 @@ async function renderCommissionRecords() {
     
     try {
         const res = await apiRequest('/commission/records');
-        const { list, total } = res.data;
+        const { list, total, summary } = res.data;
+        
+        // 统计
+        const pendingCount = list.filter(r => r.claim_status === 0).length;
+        const claimedCount = list.filter(r => r.claim_status === 1).length;
+        const autoCount = list.filter(r => r.claim_status === 3).length;
         
         content.innerHTML = `
-            <div class="card">
-                <div class="card-header flex items-center justify-between">
-                    <span>洗码发放记录</span>
-                    <div class="flex space-x-2">
-                        <button class="btn btn-success text-sm">批量通过</button>
-                        <button class="btn btn-outline text-sm">导出</button>
+            <div class="space-y-4">
+                <!-- 统计卡片 -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="bg-white rounded-lg p-4 shadow">
+                        <div class="flex items-center">
+                            <div class="p-3 rounded-full bg-blue-100 text-blue-600"><i class="fas fa-list"></i></div>
+                            <div class="ml-3">
+                                <div class="text-sm text-gray-500">总记录</div>
+                                <div class="text-xl font-bold">${total || list.length}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-lg p-4 shadow">
+                        <div class="flex items-center">
+                            <div class="p-3 rounded-full bg-orange-100 text-orange-600"><i class="fas fa-hand-pointer"></i></div>
+                            <div class="ml-3">
+                                <div class="text-sm text-gray-500">待领取</div>
+                                <div class="text-xl font-bold text-orange-600">${pendingCount}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-lg p-4 shadow">
+                        <div class="flex items-center">
+                            <div class="p-3 rounded-full bg-green-100 text-green-600"><i class="fas fa-check-circle"></i></div>
+                            <div class="ml-3">
+                                <div class="text-sm text-gray-500">已领取</div>
+                                <div class="text-xl font-bold text-green-600">${claimedCount}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-lg p-4 shadow">
+                        <div class="flex items-center">
+                            <div class="p-3 rounded-full bg-purple-100 text-purple-600"><i class="fas fa-bolt"></i></div>
+                            <div class="ml-3">
+                                <div class="text-sm text-gray-500">自动到账</div>
+                                <div class="text-xl font-bold text-purple-600">${autoCount}</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div class="card-body">
-                    <div class="overflow-x-auto">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>会员账号</th>
-                                    <th>方案名称</th>
-                                    <th>游戏类型</th>
-                                    <th>有效投注</th>
-                                    <th>洗码比例</th>
-                                    <th>返水金额</th>
-                                    <th>结算日期</th>
-                                    <th>状态</th>
-                                    <th>操作</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${list.map(r => `
+                
+                <div class="card">
+                    <div class="card-header flex items-center justify-between">
+                        <span>洗码发放记录 <span class="badge badge-primary">${list.length}</span></span>
+                        <div class="flex space-x-2">
+                            <button onclick="triggerCommissionCalculate()" class="btn btn-purple text-sm"><i class="fas fa-calculator mr-1"></i>手动计算</button>
+                            <button class="btn btn-success text-sm">批量通过</button>
+                            <button class="btn btn-outline text-sm">导出</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="overflow-x-auto">
+                            <table class="data-table">
+                                <thead>
                                     <tr>
-                                        <td>${r.username}</td>
-                                        <td>${r.scheme_name}</td>
-                                        <td>${r.game_type}</td>
-                                        <td>¥ ${formatNumber(r.valid_bet_amount)}</td>
-                                        <td>${(r.commission_rate * 100).toFixed(2)}%</td>
-                                        <td class="text-green-600 font-medium">¥ ${formatNumber(r.commission_amount)}</td>
-                                        <td>${r.settlement_date}</td>
-                                        <td>${getAuditStatusBadge(r.audit_status)}</td>
-                                        <td>
-                                            ${r.audit_status === 0 ? `
-                                                <button class="text-green-500 hover:text-green-700 mr-2" title="通过">
-                                                    <i class="fas fa-check"></i>
-                                                </button>
-                                                <button class="text-red-500 hover:text-red-700" title="拒绝">
-                                                    <i class="fas fa-times"></i>
-                                                </button>
-                                            ` : '-'}
-                                        </td>
+                                        <th>会员账号</th>
+                                        <th>方案名称</th>
+                                        <th>游戏类型</th>
+                                        <th>有效投注</th>
+                                        <th>返水金额</th>
+                                        <th>结算日期</th>
+                                        <th>审核状态</th>
+                                        <th>领取状态</th>
+                                        <th>操作</th>
                                     </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody>
+                                    ${list.map(r => `
+                                        <tr>
+                                            <td>${escapeHtml(r.username || '')}</td>
+                                            <td>${escapeHtml(r.scheme_name || '')}</td>
+                                            <td>${escapeHtml(r.game_type || '')}</td>
+                                            <td>¥ ${formatNumber(r.valid_bet_amount)}</td>
+                                            <td class="text-green-600 font-medium">¥ ${formatNumber(r.commission_amount)}</td>
+                                            <td>${r.settlement_date || '-'}</td>
+                                            <td>${getAuditStatusBadge(r.audit_status)}</td>
+                                            <td>${getClaimStatusBadge(r.claim_status)}</td>
+                                            <td>
+                                                ${r.audit_status === 0 ? `
+                                                    <button onclick="auditCommissionRecord(${r.record_id}, 'approve')" class="text-green-500 hover:text-green-700 mr-2" title="通过">
+                                                        <i class="fas fa-check"></i>
+                                                    </button>
+                                                    <button onclick="auditCommissionRecord(${r.record_id}, 'reject')" class="text-red-500 hover:text-red-700" title="拒绝">
+                                                        <i class="fas fa-times"></i>
+                                                    </button>
+                                                ` : '-'}
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
         `;
     } catch (error) {
-        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+// 获取领取状态徽章
+function getClaimStatusBadge(status) {
+    const statusMap = {
+        0: { label: '待领取', class: 'badge-warning' },
+        1: { label: '已领取', class: 'badge-success' },
+        2: { label: '已过期', class: 'badge-secondary' },
+        3: { label: '自动到账', class: 'badge-info' }
+    };
+    const info = statusMap[status] || { label: '未知', class: 'badge-secondary' };
+    return `<span class="badge ${info.class}">${info.label}</span>`;
+}
+
+// 审核洗码记录
+async function auditCommissionRecord(recordId, action) {
+    const actionText = action === 'approve' ? '通过' : '拒绝';
+    if (!confirm(`确定要${actionText}该洗码记录吗？`)) return;
+    
+    try {
+        const res = await apiRequest(`/commission/records/${recordId}/audit`, {
+            method: 'POST',
+            body: JSON.stringify({ action })
+        });
+        if (res.success) {
+            alert(`${actionText}成功`);
+            loadPage('commission-records');
+        } else {
+            alert(res.message || `${actionText}失败`);
+        }
+    } catch (error) {
+        alert(`${actionText}失败: ` + error.message);
+    }
+}
+
+// 手动触发洗码计算
+async function triggerCommissionCalculate() {
+    if (!confirm('确定要手动触发洗码计算吗？这将计算所有启用自动派发的方案。')) return;
+    
+    try {
+        const today = new Date().toISOString().split('T')[0];
+        const res = await apiRequest('/commission/calculate', {
+            method: 'POST',
+            body: JSON.stringify({ start_date: today, end_date: today })
+        });
+        if (res.success) {
+            alert(res.message || '洗码计算完成');
+            loadPage('commission-records');
+        } else {
+            alert(res.message || '洗码计算失败');
+        }
+    } catch (error) {
+        alert('洗码计算失败: ' + error.message);
     }
 }
 
@@ -7621,7 +7837,7 @@ async function renderLoginLogs() {
 // 洗码方案 - 新增/编辑
 function showAddCommissionScheme() {
     openModal(`
-        <div class="p-6" style="min-width: 550px;">
+        <div class="p-6" style="min-width: 600px; max-height: 85vh; overflow-y: auto;">
             <h3 class="text-lg font-bold mb-4"><i class="fas fa-plus-circle text-purple-500 mr-2"></i>新增洗码方案</h3>
             <form id="schemeForm" class="space-y-4">
                 <div class="grid grid-cols-2 gap-4">
@@ -7658,7 +7874,49 @@ function showAddCommissionScheme() {
                         <div><label class="block text-xs text-gray-600 mb-1">牛牛</label><input type="number" id="rateNiuniu" class="form-input w-full" value="0.7" min="0" max="10" step="0.01"></div>
                     </div>
                 </div>
-                <div><label class="block text-sm font-medium text-gray-700 mb-1">状态</label><select id="schemeStatus" class="form-input w-full"><option value="1">启用</option><option value="0">禁用</option></select></div>
+                
+                <!-- 自动派发设置 -->
+                <div class="border rounded-lg p-4 bg-purple-50 border-purple-200">
+                    <h4 class="text-sm font-semibold mb-3"><i class="fas fa-magic text-purple-500 mr-1"></i>自动派发设置</h4>
+                    <div class="space-y-3">
+                        <div class="flex items-center">
+                            <input type="checkbox" id="schemeAutoSend" class="mr-2" onchange="toggleAutoSendOptions()">
+                            <label class="text-sm font-medium text-gray-700">启用自动派发</label>
+                            <span class="ml-2 text-xs text-gray-500">(系统自动计算并生成洗码记录)</span>
+                        </div>
+                        <div id="autoSendOptions" class="hidden space-y-3 mt-3 pl-4 border-l-2 border-purple-300">
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">派发方式 <span class="text-red-500">*</span></label>
+                                    <select id="schemeSendType" class="form-input w-full">
+                                        <option value="2" selected>用户手动领取</option>
+                                        <option value="1">自动到账</option>
+                                    </select>
+                                    <span class="text-xs text-gray-500">手动领取: 用户需在前端页面主动领取</span>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">周期内最大领取次数</label>
+                                    <input type="number" id="schemeMaxClaims" class="form-input w-full" value="1" min="1" max="100">
+                                </div>
+                            </div>
+                            <div class="bg-orange-50 border border-orange-200 rounded p-3 text-sm">
+                                <i class="fas fa-info-circle text-orange-500 mr-1"></i>
+                                <strong>手动领取说明:</strong> 洗码结算后，系统会生成待领取记录，用户需要在前端页面主动点击领取才能到账。未领取的洗码将在7天后过期。
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">状态</label>
+                        <select id="schemeStatus" class="form-input w-full"><option value="1">启用</option><option value="0">禁用</option></select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">描述</label>
+                        <input type="text" id="schemeDescription" class="form-input w-full" placeholder="方案描述(可选)">
+                    </div>
+                </div>
                 <div class="flex justify-end gap-3 pt-4 border-t">
                     <button type="button" onclick="closeModal()" class="btn btn-secondary">取消</button>
                     <button type="submit" class="btn btn-primary"><i class="fas fa-save mr-1"></i>保存</button>
@@ -7669,7 +7927,19 @@ function showAddCommissionScheme() {
     document.getElementById('schemeForm').onsubmit = async (e) => { e.preventDefault(); await submitCommissionScheme(); };
 }
 
+// 切换自动派发选项显示
+function toggleAutoSendOptions() {
+    const checkbox = document.getElementById('schemeAutoSend');
+    const options = document.getElementById('autoSendOptions');
+    if (checkbox && options) {
+        options.classList.toggle('hidden', !checkbox.checked);
+    }
+}
+
 async function submitCommissionScheme(schemeId = null) {
+    const autoSendCheckbox = document.getElementById('schemeAutoSend');
+    const autoSend = autoSendCheckbox ? (autoSendCheckbox.checked ? 1 : 0) : 0;
+    
     const data = {
         scheme_name: document.getElementById('schemeName').value.trim(),
         settlement_cycle: parseInt(document.getElementById('schemeCycle').value),
@@ -7679,7 +7949,11 @@ async function submitCommissionScheme(schemeId = null) {
         dragon_tiger_rate: (parseFloat(document.getElementById('rateDragonTiger').value) || 0) / 100,
         roulette_rate: (parseFloat(document.getElementById('rateRoulette').value) || 0) / 100,
         niuniu_rate: (parseFloat(document.getElementById('rateNiuniu').value) || 0) / 100,
-        status: parseInt(document.getElementById('schemeStatus').value)
+        status: parseInt(document.getElementById('schemeStatus').value),
+        auto_send: autoSend,
+        send_type: autoSend ? parseInt(document.getElementById('schemeSendType').value) : 1,
+        max_claims_per_cycle: autoSend ? parseInt(document.getElementById('schemeMaxClaims').value) : 1,
+        description: document.getElementById('schemeDescription')?.value.trim() || null
     };
     if (!data.scheme_name) { alert('请输入方案名称'); return; }
     try {
@@ -7706,6 +7980,19 @@ async function editCommissionScheme(schemeId) {
             document.getElementById('rateRoulette').value = (s.roulette_rate || 0) * 100;
             document.getElementById('rateNiuniu').value = (s.niuniu_rate || 0) * 100;
             document.getElementById('schemeStatus').value = s.status;
+            document.getElementById('schemeDescription').value = s.description || '';
+            
+            // 设置自动派发选项
+            const autoSendCheckbox = document.getElementById('schemeAutoSend');
+            if (autoSendCheckbox) {
+                autoSendCheckbox.checked = s.auto_send === 1;
+                toggleAutoSendOptions();
+                if (s.auto_send === 1) {
+                    document.getElementById('schemeSendType').value = s.send_type || 2;
+                    document.getElementById('schemeMaxClaims').value = s.max_claims_per_cycle || 1;
+                }
+            }
+            
             document.querySelector('#schemeForm').previousElementSibling.innerHTML = '<i class="fas fa-edit text-purple-500 mr-2"></i>编辑洗码方案';
             document.getElementById('schemeForm').onsubmit = async (e) => { e.preventDefault(); await submitCommissionScheme(schemeId); };
         }, 100);
@@ -7719,6 +8006,357 @@ async function deleteCommissionScheme(schemeId, schemeName) {
         if (res.success) { alert('删除成功'); loadPage('commission-schemes'); }
         else { alert(res.message || '删除失败'); }
     } catch (error) { alert('删除失败: ' + error.message); }
+}
+
+// ==================== 代理管理弹窗 ====================
+// 新增代理弹窗
+async function showAddAgent(parentId = null) {
+    // 获取上级代理下拉选项
+    const agents = window._agentsList || [];
+    const schemes = window._commissionSchemes || [];
+    const parentOptions = agents.filter(a => a.level <= 2).map(a => 
+        `<option value="${a.agent_id}" ${parentId === a.agent_id ? 'selected' : ''}>${escapeHtml(a.agent_username)} (${a.level === 1 ? '股东' : '总代'})</option>`
+    ).join('');
+    const schemeOptions = schemes.map(s => 
+        `<option value="${s.scheme_id}">${escapeHtml(s.scheme_name)}</option>`
+    ).join('');
+    
+    openModal(`
+        <div class="p-6" style="min-width: 600px;">
+            <h3 class="text-lg font-bold mb-4"><i class="fas fa-user-plus text-blue-500 mr-2"></i>新增代理</h3>
+            <form id="agentForm" class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">代理账号 <span class="text-red-500">*</span></label>
+                        <input type="text" id="agentUsername" class="form-input w-full" placeholder="字母+数字，2-50位" required>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">登录密码 <span class="text-red-500">*</span></label>
+                        <input type="password" id="agentPassword" class="form-input w-full" placeholder="至少6位" required>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">昵称</label>
+                        <input type="text" id="agentNickname" class="form-input w-full" placeholder="显示名称">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">层级 <span class="text-red-500">*</span></label>
+                        <select id="agentLevel" class="form-input w-full" onchange="onAgentLevelChange()">
+                            <option value="1">股东 (一级)</option>
+                            <option value="2">总代 (二级)</option>
+                            <option value="3" selected>代理 (三级)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div id="parentAgentGroup">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">上级代理</label>
+                        <select id="agentParent" class="form-input w-full">
+                            <option value="">-- 无上级 --</option>
+                            ${parentOptions}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">洗码方案</label>
+                        <select id="agentScheme" class="form-input w-full">
+                            <option value="">-- 不指定 --</option>
+                            ${schemeOptions}
+                        </select>
+                    </div>
+                </div>
+                <div class="border rounded-lg p-4 bg-gray-50">
+                    <h4 class="text-sm font-semibold mb-3"><i class="fas fa-percent text-purple-500 mr-1"></i>分成设置</h4>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs text-gray-600 mb-1">占成比例 (%)</label>
+                            <input type="number" id="agentShareRatio" class="form-input w-full" value="0" min="0" max="100" step="0.1">
+                            <span class="text-xs text-gray-400">从公司盈利中获取的比例</span>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-600 mb-1">佣金比例 (%)</label>
+                            <input type="number" id="agentCommissionRatio" class="form-input w-full" value="0" min="0" max="100" step="0.1">
+                            <span class="text-xs text-gray-400">从下级有效投注中获取的比例</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">联系电话</label>
+                        <input type="text" id="agentPhone" class="form-input w-full" placeholder="联系电话">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">货币类型</label>
+                        <select id="agentCurrency" class="form-input w-full">
+                            <option value="CNY" selected>人民币 (CNY)</option>
+                            <option value="USD">美元 (USD)</option>
+                            <option value="HKD">港币 (HKD)</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">备注</label>
+                    <textarea id="agentRemark" class="form-input w-full" rows="2" placeholder="备注信息"></textarea>
+                </div>
+                <div class="flex justify-end gap-3 pt-4 border-t">
+                    <button type="button" onclick="closeModal()" class="btn btn-secondary">取消</button>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save mr-1"></i>保存</button>
+                </div>
+            </form>
+        </div>
+    `);
+    document.getElementById('agentForm').onsubmit = async (e) => { e.preventDefault(); await submitAgent(); };
+}
+
+// 层级变化时更新上级代理选项
+function onAgentLevelChange() {
+    const level = parseInt(document.getElementById('agentLevel').value);
+    const parentGroup = document.getElementById('parentAgentGroup');
+    const parentSelect = document.getElementById('agentParent');
+    
+    if (level === 1) {
+        // 股东无上级
+        parentGroup.style.display = 'none';
+        parentSelect.value = '';
+    } else {
+        parentGroup.style.display = 'block';
+        // 更新可选的上级代理（只能选择比自己层级高的）
+        const agents = window._agentsList || [];
+        const options = agents.filter(a => a.level < level).map(a => 
+            `<option value="${a.agent_id}">${escapeHtml(a.agent_username)} (${a.level === 1 ? '股东' : '总代'})</option>`
+        ).join('');
+        parentSelect.innerHTML = '<option value="">-- 无上级 --</option>' + options;
+    }
+}
+
+// 提交新增代理
+async function submitAgent(agentId = null) {
+    const data = {
+        agent_username: document.getElementById('agentUsername').value.trim(),
+        password: document.getElementById('agentPassword').value,
+        nickname: document.getElementById('agentNickname').value.trim() || null,
+        level: parseInt(document.getElementById('agentLevel').value),
+        parent_agent_id: document.getElementById('agentParent').value ? parseInt(document.getElementById('agentParent').value) : null,
+        default_commission_scheme_id: document.getElementById('agentScheme').value ? parseInt(document.getElementById('agentScheme').value) : null,
+        share_ratio: parseFloat(document.getElementById('agentShareRatio').value) || 0,
+        commission_ratio: parseFloat(document.getElementById('agentCommissionRatio').value) || 0,
+        contact_phone: document.getElementById('agentPhone').value.trim() || null,
+        currency: document.getElementById('agentCurrency').value,
+        remark: document.getElementById('agentRemark').value.trim() || null
+    };
+    
+    if (!data.agent_username || data.agent_username.length < 2) {
+        alert('请输入有效的代理账号(至少2位)');
+        return;
+    }
+    if (!agentId && (!data.password || data.password.length < 6)) {
+        alert('请设置至少6位的密码');
+        return;
+    }
+    
+    try {
+        const url = agentId ? `/agents/${agentId}` : '/agents';
+        const method = agentId ? 'PUT' : 'POST';
+        // 编辑时不发送密码字段（除非明确修改）
+        if (agentId && !data.password) {
+            delete data.password;
+        }
+        const res = await apiRequest(url, { method, body: JSON.stringify(data) });
+        if (res.success) {
+            closeModal();
+            alert(agentId ? '代理信息更新成功' : '代理创建成功');
+            loadPage('agents');
+        } else {
+            alert(res.message || '操作失败');
+        }
+    } catch (error) {
+        alert('操作失败: ' + error.message);
+    }
+}
+
+// 编辑代理
+async function editAgent(agentId) {
+    try {
+        const res = await apiRequest(`/agents/${agentId}`);
+        if (!res.success) {
+            alert('获取代理详情失败');
+            return;
+        }
+        const agent = res.data;
+        
+        // 先显示新增弹窗
+        await showAddAgent(agent.parent_agent_id);
+        
+        setTimeout(() => {
+            // 更新弹窗标题和表单数据
+            document.querySelector('#agentForm').previousElementSibling.innerHTML = '<i class="fas fa-edit text-blue-500 mr-2"></i>编辑代理';
+            document.getElementById('agentUsername').value = agent.agent_username || '';
+            document.getElementById('agentUsername').disabled = true; // 账号不允许修改
+            document.getElementById('agentPassword').placeholder = '留空则不修改密码';
+            document.getElementById('agentPassword').required = false;
+            document.getElementById('agentNickname').value = agent.nickname || '';
+            document.getElementById('agentLevel').value = agent.level || 3;
+            document.getElementById('agentLevel').disabled = true; // 层级不允许修改
+            document.getElementById('agentParent').value = agent.parent_agent_id || '';
+            document.getElementById('agentScheme').value = agent.default_commission_scheme_id || '';
+            document.getElementById('agentShareRatio').value = agent.share_ratio || 0;
+            document.getElementById('agentCommissionRatio').value = agent.commission_ratio || 0;
+            document.getElementById('agentPhone').value = agent.contact_phone || '';
+            document.getElementById('agentCurrency').value = agent.currency || 'CNY';
+            document.getElementById('agentRemark').value = agent.remark || '';
+            
+            // 更改提交处理
+            document.getElementById('agentForm').onsubmit = async (e) => {
+                e.preventDefault();
+                const editData = {
+                    nickname: document.getElementById('agentNickname').value.trim() || null,
+                    parent_agent_id: document.getElementById('agentParent').value ? parseInt(document.getElementById('agentParent').value) : null,
+                    default_commission_scheme_id: document.getElementById('agentScheme').value ? parseInt(document.getElementById('agentScheme').value) : null,
+                    share_ratio: parseFloat(document.getElementById('agentShareRatio').value) || 0,
+                    commission_ratio: parseFloat(document.getElementById('agentCommissionRatio').value) || 0,
+                    contact_phone: document.getElementById('agentPhone').value.trim() || null,
+                    remark: document.getElementById('agentRemark').value.trim() || null
+                };
+                // 如果输入了新密码
+                const newPassword = document.getElementById('agentPassword').value;
+                if (newPassword && newPassword.length >= 6) {
+                    editData.password = newPassword;
+                }
+                try {
+                    const res = await apiRequest(`/agents/${agentId}`, { method: 'PUT', body: JSON.stringify(editData) });
+                    if (res.success) {
+                        closeModal();
+                        alert('代理信息更新成功');
+                        loadPage('agents');
+                    } else {
+                        alert(res.message || '更新失败');
+                    }
+                } catch (error) {
+                    alert('更新失败: ' + error.message);
+                }
+            };
+        }, 100);
+    } catch (error) {
+        alert('获取详情失败: ' + error.message);
+    }
+}
+
+// 查看代理详情
+async function viewAgentDetail(agentId) {
+    try {
+        const res = await apiRequest(`/agents/${agentId}`);
+        if (!res.success) {
+            alert('获取代理详情失败');
+            return;
+        }
+        const agent = res.data;
+        const subAgents = agent.sub_agents || [];
+        
+        openModal(`
+            <div class="p-6" style="min-width: 600px;">
+                <h3 class="text-lg font-bold mb-4"><i class="fas fa-user-tie text-blue-500 mr-2"></i>代理详情</h3>
+                <div class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="bg-gray-50 p-3 rounded">
+                            <span class="text-gray-500 text-sm">代理账号</span>
+                            <div class="font-bold">${escapeHtml(agent.agent_username)}</div>
+                        </div>
+                        <div class="bg-gray-50 p-3 rounded">
+                            <span class="text-gray-500 text-sm">昵称</span>
+                            <div class="font-bold">${escapeHtml(agent.nickname) || '-'}</div>
+                        </div>
+                        <div class="bg-gray-50 p-3 rounded">
+                            <span class="text-gray-500 text-sm">层级</span>
+                            <div>${getLevelBadge(agent.level)}</div>
+                        </div>
+                        <div class="bg-gray-50 p-3 rounded">
+                            <span class="text-gray-500 text-sm">上级代理</span>
+                            <div class="font-bold">${escapeHtml(agent.parent_username) || '-'}</div>
+                        </div>
+                        <div class="bg-gray-50 p-3 rounded">
+                            <span class="text-gray-500 text-sm">账户余额</span>
+                            <div class="font-bold text-green-600">¥ ${formatNumber(agent.balance)}</div>
+                        </div>
+                        <div class="bg-gray-50 p-3 rounded">
+                            <span class="text-gray-500 text-sm">状态</span>
+                            <div>${getStatusBadge(agent.status)}</div>
+                        </div>
+                        <div class="bg-gray-50 p-3 rounded">
+                            <span class="text-gray-500 text-sm">占成比例</span>
+                            <div><span class="badge badge-purple">${agent.share_ratio}%</span></div>
+                        </div>
+                        <div class="bg-gray-50 p-3 rounded">
+                            <span class="text-gray-500 text-sm">佣金比例</span>
+                            <div><span class="badge badge-info">${agent.commission_ratio}%</span></div>
+                        </div>
+                        <div class="bg-gray-50 p-3 rounded">
+                            <span class="text-gray-500 text-sm">下级代理数</span>
+                            <div class="font-bold">${agent.sub_agent_count || 0}</div>
+                        </div>
+                        <div class="bg-gray-50 p-3 rounded">
+                            <span class="text-gray-500 text-sm">玩家数</span>
+                            <div class="font-bold">${agent.player_count || 0}</div>
+                        </div>
+                        <div class="bg-gray-50 p-3 rounded">
+                            <span class="text-gray-500 text-sm">联系电话</span>
+                            <div class="font-bold">${escapeHtml(agent.contact_phone) || '-'}</div>
+                        </div>
+                        <div class="bg-gray-50 p-3 rounded">
+                            <span class="text-gray-500 text-sm">创建时间</span>
+                            <div class="font-bold text-sm">${agent.created_at || '-'}</div>
+                        </div>
+                    </div>
+                    ${subAgents.length > 0 ? `
+                    <div class="border-t pt-4">
+                        <h4 class="text-sm font-semibold mb-2">直属下级代理</h4>
+                        <div class="space-y-1">
+                            ${subAgents.map(s => `
+                                <div class="flex items-center justify-between bg-gray-50 p-2 rounded">
+                                    <span>${escapeHtml(s.agent_username)} ${getLevelBadge(s.level)}</span>
+                                    <span class="text-gray-500 text-sm">${s.player_count || 0}人</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                    ` : ''}
+                    ${agent.remark ? `
+                    <div class="bg-yellow-50 p-3 rounded">
+                        <span class="text-gray-500 text-sm">备注</span>
+                        <div>${escapeHtml(agent.remark)}</div>
+                    </div>
+                    ` : ''}
+                </div>
+                <div class="flex justify-end pt-4 border-t mt-4">
+                    <button onclick="closeModal()" class="btn btn-secondary">关闭</button>
+                </div>
+            </div>
+        `);
+    } catch (error) {
+        alert('获取详情失败: ' + error.message);
+    }
+}
+
+// 切换代理状态
+async function toggleAgentStatus(agentId, currentStatus) {
+    const newStatus = currentStatus === 1 ? 0 : 1;
+    const action = newStatus === 1 ? '启用' : '禁用';
+    
+    if (!confirm(`确定要${action}该代理吗？`)) return;
+    
+    try {
+        const res = await apiRequest(`/agents/${agentId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ status: newStatus })
+        });
+        if (res.success) {
+            alert(`${action}成功`);
+            loadPage('agents');
+        } else {
+            alert(res.message || `${action}失败`);
+        }
+    } catch (error) {
+        alert(`${action}失败: ` + error.message);
+    }
 }
 
 // 新增荷官
