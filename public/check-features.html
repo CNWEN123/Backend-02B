@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>功能检查 - Live Dealer Admin V2.1</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 p-8">
+    <div class="max-w-4xl mx-auto">
+        <div class="bg-white rounded-lg shadow-lg p-6">
+            <h1 class="text-2xl font-bold mb-6">
+                <i class="fas fa-check-circle text-green-500 mr-2"></i>
+                股东/代理分享功能检查
+            </h1>
+
+            <div class="space-y-4">
+                <!-- 系统信息 -->
+                <div class="border rounded-lg p-4">
+                    <h2 class="font-bold text-lg mb-3">📋 系统信息</h2>
+                    <div class="grid grid-cols-2 gap-2 text-sm">
+                        <div class="bg-gray-50 p-2 rounded">
+                            <span class="text-gray-600">系统版本:</span>
+                            <span class="font-bold ml-2">Live Dealer Admin V2.1</span>
+                        </div>
+                        <div class="bg-gray-50 p-2 rounded">
+                            <span class="text-gray-600">当前时间:</span>
+                            <span class="font-bold ml-2" id="currentTime"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- JavaScript功能检查 -->
+                <div class="border rounded-lg p-4">
+                    <h2 class="font-bold text-lg mb-3">🔧 JavaScript功能检查</h2>
+                    <div id="jsChecks" class="space-y-2"></div>
+                </div>
+
+                <!-- API端点检查 -->
+                <div class="border rounded-lg p-4">
+                    <h2 class="font-bold text-lg mb-3">🌐 API端点检查</h2>
+                    <div id="apiChecks" class="space-y-2"></div>
+                </div>
+
+                <!-- 文件加载检查 -->
+                <div class="border rounded-lg p-4">
+                    <h2 class="font-bold text-lg mb-3">📦 文件加载检查</h2>
+                    <div id="fileChecks" class="space-y-2"></div>
+                </div>
+
+                <!-- 操作说明 -->
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h2 class="font-bold text-blue-800 mb-2">💡 如何解决问题</h2>
+                    <div class="text-sm text-blue-700 space-y-1">
+                        <p><strong>如果看到红色❌：</strong></p>
+                        <p>1. 按 <kbd class="bg-white px-2 py-1 rounded border">Ctrl + Shift + R</kbd> (Windows) 或 <kbd class="bg-white px-2 py-1 rounded border">Cmd + Shift + R</kbd> (Mac) 强制刷新</p>
+                        <p>2. 或按 <kbd class="bg-white px-2 py-1 rounded border">F12</kbd> 打开开发者工具 → Network标签 → 勾选"Disable cache" → 刷新页面</p>
+                        <p>3. 或使用浏览器的隐私/无痕模式访问</p>
+                    </div>
+                </div>
+
+                <!-- 访问按钮 -->
+                <div class="flex gap-3">
+                    <a href="/" class="flex-1 bg-blue-500 text-white py-3 px-4 rounded-lg text-center font-bold hover:bg-blue-600 transition">
+                        <i class="fas fa-home mr-2"></i>返回首页
+                    </a>
+                    <button onclick="runChecks()" class="flex-1 bg-green-500 text-white py-3 px-4 rounded-lg font-bold hover:bg-green-600 transition">
+                        <i class="fas fa-sync-alt mr-2"></i>重新检查
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 显示当前时间
+        document.getElementById('currentTime').textContent = new Date().toLocaleString('zh-CN');
+
+        function addCheckResult(containerId, name, passed, details = '') {
+            const container = document.getElementById(containerId);
+            const div = document.createElement('div');
+            div.className = `flex items-start gap-2 p-2 rounded ${passed ? 'bg-green-50' : 'bg-red-50'}`;
+            div.innerHTML = `
+                <i class="fas fa-${passed ? 'check-circle text-green-500' : 'times-circle text-red-500'} mt-0.5"></i>
+                <div class="flex-1">
+                    <div class="font-medium ${passed ? 'text-green-800' : 'text-red-800'}">${name}</div>
+                    ${details ? `<div class="text-xs text-gray-600 mt-1">${details}</div>` : ''}
+                </div>
+            `;
+            container.appendChild(div);
+        }
+
+        async function runChecks() {
+            // 清空之前的结果
+            document.getElementById('jsChecks').innerHTML = '';
+            document.getElementById('apiChecks').innerHTML = '';
+            document.getElementById('fileChecks').innerHTML = '';
+
+            // 1. JavaScript功能检查
+            console.log('=== JavaScript功能检查 ===');
+            
+            const jsFunctions = [
+                'showAgentShareSettings',
+                'saveAgentShareSettings',
+                'regenerateInviteCode',
+                'verifyAgentDomain',
+                'copyInviteCode',
+                'copyAgentInviteCode',
+                'copyAgentInviteUrl'
+            ];
+
+            jsFunctions.forEach(funcName => {
+                const exists = typeof window[funcName] === 'function';
+                console.log(`${funcName}:`, exists ? '✅' : '❌');
+                addCheckResult('jsChecks', funcName, exists, 
+                    exists ? '函数已加载' : '函数未找到，请清除浏览器缓存');
+            });
+
+            // 2. API端点检查
+            console.log('=== API端点检查 ===');
+            
+            // 测试公开API（无需认证）
+            try {
+                const response = await fetch('/api/v1/public/agent-by-invite/TEST1234');
+                const data = await response.json();
+                const passed = response.status === 404 && data.message.includes('邀请码');
+                console.log('公开API测试:', passed ? '✅' : '❌', data);
+                addCheckResult('apiChecks', '邀请码验证API', passed, 
+                    `状态: ${response.status}, 响应: ${data.message}`);
+            } catch (error) {
+                console.error('API测试失败:', error);
+                addCheckResult('apiChecks', '邀请码验证API', false, `错误: ${error.message}`);
+            }
+
+            // 3. 文件加载检查
+            console.log('=== 文件加载检查 ===');
+            
+            try {
+                const appJsResponse = await fetch('/static/app.js', { method: 'HEAD' });
+                const passed = appJsResponse.ok;
+                const contentLength = appJsResponse.headers.get('content-length');
+                console.log('app.js加载:', passed ? '✅' : '❌', `大小: ${contentLength} 字节`);
+                addCheckResult('fileChecks', 'app.js文件', passed, 
+                    `HTTP状态: ${appJsResponse.status}, 大小: ${(contentLength / 1024).toFixed(2)} KB`);
+                
+                // 检查文件大小是否正确（应该约522KB）
+                const expectedSize = 500 * 1024; // 至少500KB
+                const sizeCheck = parseInt(contentLength) > expectedSize;
+                addCheckResult('fileChecks', 'app.js文件大小', sizeCheck,
+                    sizeCheck ? '文件大小正常' : '文件可能被缓存，请强制刷新');
+            } catch (error) {
+                console.error('文件检查失败:', error);
+                addCheckResult('fileChecks', 'app.js文件', false, `错误: ${error.message}`);
+            }
+
+            // 4. 整体检查结果
+            const allPassed = jsFunctions.every(func => typeof window[func] === 'function');
+            
+            if (allPassed) {
+                console.log('✅ 所有功能正常！');
+                showNotification('success', '✅ 所有功能检查通过！可以正常使用股东/代理分享功能。');
+            } else {
+                console.log('❌ 部分功能缺失，请清除浏览器缓存');
+                showNotification('error', '❌ 检测到功能缺失，请按 Ctrl+Shift+R 强制刷新页面！');
+            }
+        }
+
+        function showNotification(type, message) {
+            const div = document.createElement('div');
+            div.className = `fixed top-4 right-4 p-4 rounded-lg shadow-lg ${
+                type === 'success' ? 'bg-green-500' : 'bg-red-500'
+            } text-white font-bold z-50`;
+            div.textContent = message;
+            document.body.appendChild(div);
+            setTimeout(() => div.remove(), 5000);
+        }
+
+        // 页面加载时自动运行检查
+        window.addEventListener('load', runChecks);
+    </script>
+</body>
+</html>
