@@ -581,7 +581,7 @@ async function renderDashboard() {
         initDashboardCharts(trends);
         
     } catch (error) {
-        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -895,7 +895,7 @@ async function renderPlayers() {
             </div>
         `;
     } catch (error) {
-        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -957,7 +957,7 @@ async function renderPlayersOnline() {
             </div>
         `;
     } catch (error) {
-        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -1292,7 +1292,7 @@ async function renderAgentsTree() {
             </div>
         `;
     } catch (error) {
-        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -1382,7 +1382,7 @@ async function renderTransactions() {
             </div>
         `;
     } catch (error) {
-        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -1434,7 +1434,7 @@ async function renderDeposits() {
             </div>
         `;
     } catch (error) {
-        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -1529,7 +1529,7 @@ async function renderWithdrawals() {
             </div>
         `;
     } catch (error) {
-        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -2837,7 +2837,7 @@ async function renderPaymentMethods() {
             </div>
         `;
     } catch (error) {
-        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -3229,7 +3229,7 @@ async function renderBets() {
             </div>
         `;
     } catch (error) {
-        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -3582,7 +3582,7 @@ async function renderRiskAlerts() {
             </div>
         `;
     } catch (error) {
-        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -4009,7 +4009,7 @@ async function queryRanking() {
             </div>
         `;
     } catch (error) {
-        container.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        container.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -4100,7 +4100,7 @@ async function renderAnnouncements() {
             </div>
         `;
     } catch (error) {
-        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -4185,7 +4185,7 @@ async function renderAdmins() {
         // 存储角色列表供后续使用
         window._adminRoles = roles;
     } catch (error) {
-        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -4559,7 +4559,7 @@ async function renderAuditLogs() {
             </div>
         `;
     } catch (error) {
-        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${error.message}</div>`;
+        content.innerHTML = `<div class="text-center text-red-500 py-10">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 

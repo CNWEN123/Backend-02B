@@ -40,13 +40,102 @@ app.use('/api/*', cors({
     return null
   },
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization'],
+  allowHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   credentials: true,
   maxAge: 86400
 }))
 
+// 安全头部中间件
+app.use('/api/*', async (c, next) => {
+  await next()
+  // 添加安全响应头
+  c.header('X-Content-Type-Options', 'nosniff')
+  c.header('X-Frame-Options', 'DENY')
+  c.header('X-XSS-Protection', '1; mode=block')
+  c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
+})
+
+// 请求体大小限制中间件 (最大1MB)
+const MAX_BODY_SIZE = 1024 * 1024
+app.use('/api/*', async (c, next) => {
+  const contentLength = c.req.header('Content-Length')
+  if (contentLength && parseInt(contentLength) > MAX_BODY_SIZE) {
+    return c.json({ success: false, message: '请求体过大' }, 413)
+  }
+  await next()
+})
+
 // 静态文件
 app.use('/static/*', serveStatic())
+
+// ==================== 登录速率限制 ====================
+// 内存存储登录尝试（生产环境应使用KV或D1）
+const loginAttempts = new Map<string, { count: number; firstAttempt: number; blocked: boolean }>()
+
+const MAX_LOGIN_ATTEMPTS = 5 // 最大尝试次数
+const LOGIN_WINDOW_MS = 15 * 60 * 1000 // 15分钟窗口
+const BLOCK_DURATION_MS = 30 * 60 * 1000 // 封禁30分钟
+
+function checkLoginRateLimit(ip: string): { allowed: boolean; remainingAttempts: number; blockTimeRemaining?: number } {
+  const now = Date.now()
+  const record = loginAttempts.get(ip)
+  
+  // 清理过期记录
+  if (record && now - record.firstAttempt > LOGIN_WINDOW_MS + BLOCK_DURATION_MS) {
+    loginAttempts.delete(ip)
+    return { allowed: true, remainingAttempts: MAX_LOGIN_ATTEMPTS }
+  }
+  
+  if (!record) {
+    return { allowed: true, remainingAttempts: MAX_LOGIN_ATTEMPTS }
+  }
+  
+  // 检查是否在封禁期
+  if (record.blocked) {
+    const blockEnd = record.firstAttempt + LOGIN_WINDOW_MS + BLOCK_DURATION_MS
+    if (now < blockEnd) {
+      return { 
+        allowed: false, 
+        remainingAttempts: 0,
+        blockTimeRemaining: Math.ceil((blockEnd - now) / 1000 / 60) // 剩余分钟
+      }
+    }
+    // 封禁期已过，重置
+    loginAttempts.delete(ip)
+    return { allowed: true, remainingAttempts: MAX_LOGIN_ATTEMPTS }
+  }
+  
+  // 检查窗口期内的尝试次数
+  if (now - record.firstAttempt > LOGIN_WINDOW_MS) {
+    // 窗口期已过，重置
+    loginAttempts.delete(ip)
+    return { allowed: true, remainingAttempts: MAX_LOGIN_ATTEMPTS }
+  }
+  
+  const remaining = MAX_LOGIN_ATTEMPTS - record.count
+  return { allowed: remaining > 0, remainingAttempts: Math.max(0, remaining) }
+}
+
+function recordLoginAttempt(ip: string, success: boolean): void {
+  if (success) {
+    loginAttempts.delete(ip)
+    return
+  }
+  
+  const now = Date.now()
+  const record = loginAttempts.get(ip)
+  
+  if (!record || now - record.firstAttempt > LOGIN_WINDOW_MS) {
+    loginAttempts.set(ip, { count: 1, firstAttempt: now, blocked: false })
+    return
+  }
+  
+  record.count++
+  if (record.count >= MAX_LOGIN_ATTEMPTS) {
+    record.blocked = true
+  }
+  loginAttempts.set(ip, record)
+}
 
 // ==================== 安全工具函数 ====================
 
@@ -128,11 +217,51 @@ function validatePagination(page: string | undefined, size: string | undefined):
   return { page: p, size: s }
 }
 
-// 输入验证 - 整数ID
+// 输入验证 - 字符串清理 (防止注入攻击)
+function sanitizeString(str: string | undefined | null, maxLength: number = 500): string {
+  if (!str || typeof str !== 'string') return ''
+  // 移除控制字符，保留常用字符
+  return str.slice(0, maxLength).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim()
+}
+
+// 输入验证 - 用户名格式
+function validateUsername(username: string | undefined): { valid: boolean; error?: string } {
+  if (!username || typeof username !== 'string') {
+    return { valid: false, error: '用户名不能为空' }
+  }
+  const trimmed = username.trim()
+  if (trimmed.length < 2 || trimmed.length > 50) {
+    return { valid: false, error: '用户名长度应为2-50个字符' }
+  }
+  // 只允许字母、数字、下划线和中文
+  if (!/^[\u4e00-\u9fa5a-zA-Z0-9_]+$/.test(trimmed)) {
+    return { valid: false, error: '用户名只能包含字母、数字、下划线和中文' }
+  }
+  return { valid: true }
+}
+
+// 输入验证 - 金额格式
+function validateAmount(amount: any): { valid: boolean; value: number; error?: string } {
+  const num = parseFloat(amount)
+  if (isNaN(num)) {
+    return { valid: false, value: 0, error: '金额格式错误' }
+  }
+  if (num < 0) {
+    return { valid: false, value: 0, error: '金额不能为负数' }
+  }
+  if (num > 999999999.99) {
+    return { valid: false, value: 0, error: '金额超出范围' }
+  }
+  // 保留两位小数
+  return { valid: true, value: Math.round(num * 100) / 100 }
+}
+
+// 输入验证 - ID参数
+// 输入验证 - ID参数
 function validateId(id: string | undefined): number | null {
   if (!id) return null
   const num = parseInt(id)
-  if (isNaN(num) || num < 1 || num > 2147483647) return null
+  if (isNaN(num) || num <= 0 || num > 2147483647) return null
   return num
 }
 
@@ -209,6 +338,7 @@ app.use('/api/v1/shifts/*', authMiddleware)
 app.use('/api/v1/admin/*', authMiddleware)
 app.use('/api/v1/announcements/*', authMiddleware)
 app.use('/api/v1/payment-methods/*', authMiddleware)
+app.use('/api/v1/bonus/*', authMiddleware)
 
 // ==================== 认证API ====================
 
@@ -217,6 +347,16 @@ app.post('/api/v1/auth/login', async (c) => {
   try {
     const { username, password, captcha } = await c.req.json()
     const clientIP = getClientIP(c)
+    
+    // 检查登录速率限制
+    const rateCheck = checkLoginRateLimit(clientIP)
+    if (!rateCheck.allowed) {
+      return c.json({ 
+        success: false, 
+        message: `登录尝试次数过多，请在 ${rateCheck.blockTimeRemaining} 分钟后重试`,
+        blocked: true 
+      }, 429)
+    }
     
     // 输入验证
     if (!username || typeof username !== 'string' || username.length < 2 || username.length > 50) {
@@ -237,10 +377,17 @@ app.post('/api/v1/auth/login', async (c) => {
 
     if (!admin) {
       // 记录失败登录尝试
+      recordLoginAttempt(clientIP, false)
       await c.env.DB.prepare(
         'INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, new_value, ip_address) VALUES (?, ?, ?, ?, ?, ?)'
       ).bind(0, username, 'LOGIN_FAILED', 'admin_users', '用户不存在', clientIP).run()
-      return c.json({ success: false, message: '用户名或密码错误' }, 401)
+      
+      const afterCheck = checkLoginRateLimit(clientIP)
+      return c.json({ 
+        success: false, 
+        message: '用户名或密码错误',
+        remainingAttempts: afterCheck.remainingAttempts 
+      }, 401)
     }
     
     if (admin.status !== 1) {
@@ -254,11 +401,21 @@ app.post('/api/v1/auth/login', async (c) => {
                           secureCompare(password, admin.password_hash as string)
     
     if (!passwordValid) {
+      recordLoginAttempt(clientIP, false)
       await c.env.DB.prepare(
         'INSERT INTO audit_logs (admin_id, admin_username, operation_type, target_table, new_value, ip_address) VALUES (?, ?, ?, ?, ?, ?)'
       ).bind(admin.admin_id, admin.username, 'LOGIN_FAILED', 'admin_users', '密码错误', clientIP).run()
-      return c.json({ success: false, message: '用户名或密码错误' }, 401)
+      
+      const afterCheck = checkLoginRateLimit(clientIP)
+      return c.json({ 
+        success: false, 
+        message: '用户名或密码错误',
+        remainingAttempts: afterCheck.remainingAttempts 
+      }, 401)
     }
+    
+    // 登录成功，清除登录尝试记录
+    recordLoginAttempt(clientIP, true)
 
     // 生成安全Token
     const tokenPayload = { 
