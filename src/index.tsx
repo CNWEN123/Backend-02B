@@ -1817,9 +1817,10 @@ app.put('/api/v1/bonus/configs/batch/status', async (c) => {
 })
 
 // 自动派送红利 - 根据触发条件检查并派送
+// trigger_type: manual(手动), deposit(存款), deposit_percent(存款比例), register(注册), login(登录), bet(投注), vip_upgrade(VIP晋级)
 app.post('/api/v1/bonus/auto-send', async (c) => {
   try {
-    const { user_id, trigger_type, trigger_amount } = await c.req.json()
+    const { user_id, trigger_type, trigger_amount, deposit_amount } = await c.req.json()
     
     if (!user_id || !trigger_type) {
       return c.json({ success: false, message: '参数不完整' }, 400)
@@ -1832,53 +1833,87 @@ app.post('/api/v1/bonus/auto-send', async (c) => {
     }
     
     // 查找符合条件的自动派送配置
+    // 对于 deposit_percent 类型，也查找 deposit 触发的配置（向后兼容）
+    let triggerTypes = [trigger_type]
+    if (trigger_type === 'deposit' || trigger_type === 'deposit_percent') {
+      triggerTypes = ['deposit', 'deposit_percent']
+    }
+    
+    const placeholders = triggerTypes.map(() => '?').join(',')
     const configs = await c.env.DB.prepare(`
       SELECT * FROM bonus_configs 
-      WHERE status = 1 AND auto_send = 1 AND trigger_type = ?
+      WHERE status = 1 AND auto_send = 1 AND trigger_type IN (${placeholders})
       AND (trigger_amount = 0 OR trigger_amount <= ?)
       AND (vip_levels = '' OR vip_levels LIKE ?)
       ORDER BY bonus_percentage DESC
-    `).bind(trigger_type, trigger_amount || 0, `%${(user as any).vip_level || 0}%`).all()
+    `).bind(...triggerTypes, trigger_amount || deposit_amount || 0, `%${(user as any).vip_level || 0}%`).all()
     
     const sentBonuses: any[] = []
+    const actualDepositAmount = deposit_amount || trigger_amount || 0
     
     for (const config of (configs.results || [])) {
+      const cfg = config as any
+      
+      // 检查最低存款要求
+      if (cfg.min_deposit > 0 && actualDepositAmount < cfg.min_deposit) continue
+      
       // 检查每日和总量限制
-      if ((config as any).daily_limit > 0) {
+      if (cfg.daily_limit > 0) {
         const todayCount = await c.env.DB.prepare(`
           SELECT COUNT(*) as count FROM bonus_records 
           WHERE user_id = ? AND bonus_type = ? AND DATE(created_at) = DATE('now')
-        `).bind(user_id, (config as any).bonus_type).first()
+        `).bind(user_id, cfg.bonus_type).first()
         
-        if ((todayCount as any)?.count >= (config as any).daily_limit) continue
+        if ((todayCount as any)?.count >= cfg.daily_limit) continue
       }
       
-      if ((config as any).total_limit > 0) {
+      if (cfg.total_limit > 0) {
         const totalCount = await c.env.DB.prepare(`
           SELECT COUNT(*) as count FROM bonus_records 
           WHERE user_id = ? AND bonus_type = ?
-        `).bind(user_id, (config as any).bonus_type).first()
+        `).bind(user_id, cfg.bonus_type).first()
         
-        if ((totalCount as any)?.count >= (config as any).total_limit) continue
+        if ((totalCount as any)?.count >= cfg.total_limit) continue
       }
       
       // 计算红利金额
-      let bonusAmount = (trigger_amount || 0) * ((config as any).bonus_percentage / 100)
-      if ((config as any).max_bonus > 0 && bonusAmount > (config as any).max_bonus) {
-        bonusAmount = (config as any).max_bonus
+      let bonusAmount = 0
+      
+      if (cfg.trigger_type === 'deposit_percent') {
+        // 存款比例派发：红利 = 存款金额 × 红利比例%
+        bonusAmount = actualDepositAmount * (cfg.bonus_percentage / 100)
+      } else if (cfg.bonus_percentage > 0) {
+        // 其他按比例计算的触发类型
+        bonusAmount = (trigger_amount || 0) * (cfg.bonus_percentage / 100)
+      } else {
+        // 固定金额（如果配置了max_bonus作为固定金额）
+        bonusAmount = cfg.max_bonus || 0
       }
-      if (bonusAmount < (config as any).min_deposit) continue
+      
+      // 应用红利上限
+      if (cfg.max_bonus > 0 && bonusAmount > cfg.max_bonus) {
+        bonusAmount = cfg.max_bonus
+      }
+      
+      // 红利金额为0则跳过
+      if (bonusAmount <= 0) continue
       
       // 获取流水规则
       let turnoverMultiplier = 1
-      if ((config as any).turnover_rule_id) {
+      if (cfg.turnover_rule_id) {
         const rule = await c.env.DB.prepare('SELECT multiplier FROM turnover_rules WHERE rule_id = ?')
-          .bind((config as any).turnover_rule_id).first()
+          .bind(cfg.turnover_rule_id).first()
         if (rule) turnoverMultiplier = (rule as any).multiplier || 1
       }
       
       const requiredTurnover = bonusAmount * turnoverMultiplier
-      const expiresAt = new Date(Date.now() + ((config as any).valid_days || 30) * 24 * 60 * 60 * 1000).toISOString()
+      const expiresAt = new Date(Date.now() + (cfg.valid_days || 30) * 24 * 60 * 60 * 1000).toISOString()
+      
+      // 生成备注
+      const remarkParts = [`自动派送:${cfg.bonus_name}`]
+      if (cfg.trigger_type === 'deposit_percent') {
+        remarkParts.push(`存款${actualDepositAmount}×${cfg.bonus_percentage}%`)
+      }
       
       // 创建红利记录（自动审核通过）
       const result = await c.env.DB.prepare(`
@@ -1888,9 +1923,9 @@ app.post('/api/v1/bonus/auto-send', async (c) => {
           remark, admin_id, admin_username, audit_status, expires_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, '系统自动', 1, ?)
       `).bind(
-        user_id, (user as any).username, (config as any).bonus_type, bonusAmount,
-        (config as any).turnover_rule_id, turnoverMultiplier, requiredTurnover,
-        `自动派送:${(config as any).bonus_name}`, expiresAt
+        user_id, (user as any).username, cfg.bonus_type, bonusAmount,
+        cfg.turnover_rule_id, turnoverMultiplier, requiredTurnover,
+        remarkParts.join(' | '), expiresAt
       ).run()
       
       // 更新用户余额
@@ -1899,9 +1934,12 @@ app.post('/api/v1/bonus/auto-send', async (c) => {
       
       sentBonuses.push({
         bonus_id: result.meta.last_row_id,
-        bonus_type: (config as any).bonus_type,
-        bonus_name: (config as any).bonus_name,
-        bonus_amount: bonusAmount
+        bonus_type: cfg.bonus_type,
+        bonus_name: cfg.bonus_name,
+        bonus_amount: bonusAmount,
+        trigger_type: cfg.trigger_type,
+        deposit_amount: actualDepositAmount,
+        percentage: cfg.bonus_percentage
       })
     }
     

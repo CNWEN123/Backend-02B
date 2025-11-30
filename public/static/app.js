@@ -1966,7 +1966,8 @@ const bonusTypeOptions = {
 
 const triggerTypeOptions = {
     'manual': { label: '手动派送', desc: '需管理员手动操作派送' },
-    'deposit': { label: '存款触发', desc: '玩家存款后自动派送' },
+    'deposit': { label: '存款触发', desc: '玩家存款后自动派送固定金额' },
+    'deposit_percent': { label: '存款比例派发', desc: '按存款金额的百分比自动派发红利，如存款1000元、比例10%则派发100元红利' },
     'register': { label: '注册触发', desc: '新玩家注册后自动派送' },
     'login': { label: '登录触发', desc: '玩家登录时自动派送' },
     'bet': { label: '投注触发', desc: '玩家投注后自动派送' },
@@ -2182,15 +2183,21 @@ function showAddBonusConfig() {
                         <div class="grid grid-cols-2 gap-4">
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">触发类型</label>
-                                <select id="newTriggerType" class="form-input w-full">
+                                <select id="newTriggerType" class="form-input w-full" onchange="updateTriggerTypeDesc('new')">
                                     ${Object.entries(triggerTypeOptions).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('')}
                                 </select>
-                                <p id="triggerTypeDesc" class="text-xs text-gray-500 mt-1">${triggerTypeOptions['manual'].desc}</p>
+                                <p id="newTriggerTypeDesc" class="text-xs text-gray-500 mt-1">${triggerTypeOptions['manual'].desc}</p>
                             </div>
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">触发金额 (¥)</label>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">最低触发金额 (¥)</label>
                                 <input type="number" id="newTriggerAmount" step="0.01" min="0" value="0" class="form-input w-full" placeholder="0表示不限">
+                                <p class="text-xs text-gray-400 mt-1">存款/投注达到此金额才触发</p>
                             </div>
+                        </div>
+                        <div id="newDepositPercentTip" class="hidden mt-3 p-3 bg-green-100 rounded-lg border border-green-200">
+                            <p class="text-sm text-green-700"><i class="fas fa-info-circle mr-1"></i><strong>存款比例派发说明：</strong></p>
+                            <p class="text-xs text-green-600 mt-1">红利金额 = 存款金额 × 红利比例(%)，受红利上限限制</p>
+                            <p class="text-xs text-green-600">例：存款1000元，比例10%，上限500元 → 派发100元红利</p>
                         </div>
                     </div>
                 </div>
@@ -2232,17 +2239,32 @@ function showAddBonusConfig() {
         </div>
     `, '700px');
     
-    // 绑定触发类型切换
-    document.getElementById('newTriggerType').onchange = function() {
-        const info = triggerTypeOptions[this.value] || triggerTypeOptions['manual'];
-        document.getElementById('triggerTypeDesc').textContent = info.desc;
-    };
-    
     // 绑定表单提交
     document.getElementById('addBonusConfigForm').onsubmit = async (e) => {
         e.preventDefault();
         await submitNewBonusConfig();
     };
+}
+
+// 更新触发类型描述和提示
+function updateTriggerTypeDesc(prefix) {
+    const selectEl = document.getElementById(prefix + 'TriggerType');
+    const descEl = document.getElementById(prefix + 'TriggerTypeDesc');
+    const tipEl = document.getElementById(prefix + 'DepositPercentTip');
+    
+    if (!selectEl) return;
+    
+    const value = selectEl.value;
+    const info = triggerTypeOptions[value] || triggerTypeOptions['manual'];
+    
+    if (descEl) {
+        descEl.textContent = info.desc;
+    }
+    
+    if (tipEl) {
+        // 只有选择存款比例派发时显示特殊提示
+        tipEl.classList.toggle('hidden', value !== 'deposit_percent');
+    }
 }
 
 function toggleAutoSendOptions() {
@@ -2382,14 +2404,21 @@ async function showEditBonusConfig(configId) {
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-1">触发类型</label>
-                                    <select id="editTriggerType" class="form-input w-full">
+                                    <select id="editTriggerType" class="form-input w-full" onchange="updateTriggerTypeDesc('edit')">
                                         ${Object.entries(triggerTypeOptions).map(([k, v]) => `<option value="${k}" ${config.trigger_type === k ? 'selected' : ''}>${v.label}</option>`).join('')}
                                     </select>
+                                    <p id="editTriggerTypeDesc" class="text-xs text-gray-500 mt-1">${(triggerTypeOptions[config.trigger_type] || triggerTypeOptions['manual']).desc}</p>
                                 </div>
                                 <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">触发金额 (¥)</label>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">最低触发金额 (¥)</label>
                                     <input type="number" id="editTriggerAmount" step="0.01" min="0" value="${config.trigger_amount || 0}" class="form-input w-full">
+                                    <p class="text-xs text-gray-400 mt-1">存款/投注达到此金额才触发</p>
                                 </div>
+                            </div>
+                            <div id="editDepositPercentTip" class="${config.trigger_type !== 'deposit_percent' ? 'hidden' : ''} mt-3 p-3 bg-green-100 rounded-lg border border-green-200">
+                                <p class="text-sm text-green-700"><i class="fas fa-info-circle mr-1"></i><strong>存款比例派发说明：</strong></p>
+                                <p class="text-xs text-green-600 mt-1">红利金额 = 存款金额 × 红利比例(%)，受红利上限限制</p>
+                                <p class="text-xs text-green-600">例：存款1000元，比例10%，上限500元 → 派发100元红利</p>
                             </div>
                         </div>
                     </div>
